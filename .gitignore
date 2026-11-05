@@ -1,0 +1,32 @@
+# Entorno y credenciales confidenciales
+.env
+.env.*
+*.env
+*.env.*
+PASSWORD*
+*.key
+*.pem
+
+# Dependencias y builds
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+
+# Datos locales y logs
+data/
+*.csv
+*.json
+*.log
+
+# Entornos y temporales de Python
+__pycache__/
+*.py[cod]
+.venv/
+.uv/
+
+# Carpetas de desarrollo y referencias externas
+reference_rea/
+scratch/
+.vscode/
+.idea/

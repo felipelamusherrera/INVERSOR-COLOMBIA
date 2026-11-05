@@ -1,0 +1,26 @@
+name: Daily Finviz Sync to Supabase
+
+on:
+  schedule:
+    # Lunes a Viernes a las 21:30 UTC (4:30 PM EST / 3:30 PM Colombia - Cierre de Wall Street)
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch: # Permite ejecutarlo manualmente desde GitHub si se desea
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Ejecutar Sincronización Diaria
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          uv run .agents/skills/finviz-inversor-colombia/scripts/finviz_sync.py sync --min-market-cap 1000 --retention-days 30
