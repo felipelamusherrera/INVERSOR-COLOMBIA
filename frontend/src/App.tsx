@@ -8,15 +8,32 @@ import { StockScreener } from './components/StockScreener';
 import { StockDetail } from './components/StockDetail';
 import { PeersComparison } from './components/PeersComparison';
 import { Watchlist } from './components/Watchlist';
+import { FinvizScreener } from './components/FinvizScreener';
+import { FinvizMap } from './components/FinvizMap';
+import { StrategyAIModule } from './components/StrategyAIModule';
+import { Toaster, toast } from 'sonner';
 import { AlertCircle, RefreshCw, Database, ShieldCheck } from 'lucide-react';
+
+export type MainTabType = 
+  | 'dashboard' 
+  | 'screener' 
+  | 'finviz-screener' 
+  | 'maps' 
+  | 'ai-strategy' 
+  | 'detail' 
+  | 'peers' 
+  | 'watchlist';
 
 export function App() {
   const [stocks, setStocks] = useState<StockRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentTab, setCurrentTab] = useState<'dashboard' | 'screener' | 'detail' | 'peers' | 'watchlist'>('dashboard');
-  const [selectedStock, setSelectedStock] = useState<StockRecord | null>(null);
+  const [currentTab, setCurrentTab] = useState<MainTabType>('dashboard');
   const [snapshotDate, setSnapshotDate] = useState<string | null>(null);
+
+  // Sistema de Pestañas Múltiples de Acciones (No cierra la ventana de la acción anterior)
+  const [openStockTabs, setOpenStockTabs] = useState<string[]>(['MU']);
+  const [activeStockTicker, setActiveStockTicker] = useState<string | null>('MU');
 
   // Watchlist persistida en localStorage
   const [watchlist, setWatchlist] = useState<string[]>(() => {
@@ -40,8 +57,10 @@ export function App() {
   const handleToggleWatchlist = (ticker: string) => {
     if (watchlist.includes(ticker)) {
       saveWatchlist(watchlist.filter(t => t !== ticker));
+      toast.info(`Removido de Mi Cartera: ${ticker}`);
     } else {
       saveWatchlist([...watchlist, ticker]);
+      toast.success(`Añadido a Mi Cartera: ${ticker}`);
     }
   };
 
@@ -50,7 +69,6 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      // Paginamos para descargar todos los registros superando el límite de 1.000 filas de PostgREST
       let allData: StockRecord[] = [];
       let from = 0;
       const step = 1000;
@@ -81,7 +99,6 @@ export function App() {
 
       let finalStocks = allData;
 
-      // Si la vista arrojó error o está vacía, consultar directamente la tabla base
       if (finalStocks.length === 0) {
         console.warn('Fallback to base table inversor_colombia_stocks...');
         const baseRes = await supabase
@@ -94,7 +111,6 @@ export function App() {
           throw baseRes.error;
         }
 
-        // Deduplicar por ticker reteniendo el snapshot más reciente
         const map = new Map<string, StockRecord>();
         (baseRes.data || []).forEach((row: StockRecord) => {
           if (!map.has(row.ticker)) {
@@ -106,14 +122,10 @@ export function App() {
 
       if (finalStocks.length > 0) {
         setStocks(finalStocks);
-        // Establecer fecha de snapshot más reciente
         const dates = finalStocks.map((s: StockRecord) => s.snapshot_date).filter(Boolean);
         if (dates.length > 0) {
           dates.sort().reverse();
           setSnapshotDate(dates[0]);
-        }
-        if (!selectedStock && finalStocks.length > 0) {
-          setSelectedStock(finalStocks[0]);
         }
       } else {
         setStocks([]);
@@ -130,22 +142,58 @@ export function App() {
     loadStocks();
   }, []);
 
-  // Seleccionar stock y cambiar vista al detalle
+  // Seleccionar stock y abrirlo en una nueva pestaña sin cerrar las anteriores
   const handleSelectStock = (stock: StockRecord) => {
-    setSelectedStock(stock);
+    const tick = stock.ticker.toUpperCase();
+    if (!openStockTabs.includes(tick)) {
+      setOpenStockTabs(prev => [...prev, tick]);
+    }
+    setActiveStockTicker(tick);
     setCurrentTab('detail');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Cambiar entre pestañas de acciones abiertas
+  const handleSwitchStockTab = (ticker: string) => {
+    setActiveStockTicker(ticker);
+    setCurrentTab('detail');
+  };
+
+  // Cerrar pestaña de una acción
+  const handleCloseStockTab = (ticker: string) => {
+    const filtered = openStockTabs.filter(t => t !== ticker);
+    setOpenStockTabs(filtered);
+
+    if (activeStockTicker === ticker) {
+      if (filtered.length > 0) {
+        setActiveStockTicker(filtered[filtered.length - 1]);
+        setCurrentTab('detail');
+      } else {
+        setActiveStockTicker(null);
+        setCurrentTab('screener');
+      }
+    }
+  };
+
+  // Acción activa actual
+  const currentActiveStock = stocks.find(s => s.ticker === activeStockTicker) || stocks[0] || null;
+
   return (
     <div className="app-container">
-      {/* Barra de Navegación Global */}
+      {/* Toast Notifier Sonner */}
+      <Toaster position="top-right" richColors />
+
+      {/* Barra de Navegación Global con Sistema Multi-Pestaña */}
       <Navbar
         currentTab={currentTab}
         setCurrentTab={(tab: any) => setCurrentTab(tab)}
         stocks={stocks}
         onSelectStock={handleSelectStock}
-        selectedStock={selectedStock}
+        selectedStock={currentActiveStock}
+        openStockTabs={openStockTabs}
+        activeStockTicker={activeStockTicker}
+        onSwitchStockTab={handleSwitchStockTab}
+        onCloseStockTab={handleCloseStockTab}
         lastUpdatedDate={snapshotDate}
       />
 
@@ -204,6 +252,7 @@ export function App() {
           </div>
         ) : (
           <>
+            {/* 1. Dashboard Principal */}
             {currentTab === 'dashboard' && (
               <MarketOverview
                 stocks={stocks}
@@ -213,33 +262,63 @@ export function App() {
               />
             )}
 
+            {/* 2. Screener Cuantitativo Clásico */}
             {currentTab === 'screener' && (
               <StockScreener
                 stocks={stocks}
                 onSelectStock={handleSelectStock}
-                selectedStock={selectedStock}
+                selectedStock={currentActiveStock}
               />
             )}
 
-            {currentTab === 'detail' && selectedStock && (
+            {/* 3. NUEVO MÓDULO: Screener Estilo Finviz (Imagen 2) */}
+            {currentTab === 'finviz-screener' && (
+              <FinvizScreener
+                stocks={stocks}
+                onSelectStock={handleSelectStock}
+              />
+            )}
+
+            {/* 4. NUEVO MÓDULO: Maps Heatmap / Matriz Sectorial (Imagen 3) */}
+            {currentTab === 'maps' && (
+              <FinvizMap
+                stocks={stocks}
+                onSelectStock={handleSelectStock}
+              />
+            )}
+
+            {/* 5. NUEVO MÓDULO: Estrategia IA Inversor (Feed / Muro + Registro de Posiciones) */}
+            {currentTab === 'ai-strategy' && (
+              <StrategyAIModule
+                stocks={stocks}
+                onSelectStock={handleSelectStock}
+                onAddToWatchlist={handleToggleWatchlist}
+              />
+            )}
+
+            {/* 6. Análisis Detallado (Multi-Pestaña) */}
+            {currentTab === 'detail' && currentActiveStock && (
               <StockDetail
-                stock={selectedStock}
+                key={currentActiveStock.ticker}
+                stock={currentActiveStock}
                 onBack={() => setCurrentTab('screener')}
                 onToggleWatchlist={handleToggleWatchlist}
-                isWatchlisted={watchlist.includes(selectedStock.ticker)}
+                isWatchlisted={watchlist.includes(currentActiveStock.ticker)}
               />
             )}
 
+            {/* 7. Comparador de Acciones */}
             {currentTab === 'peers' && (
               <PeersComparison
                 stocks={stocks}
-                selectedStock={selectedStock}
+                selectedStock={currentActiveStock}
                 onSelectStock={handleSelectStock}
                 onToggleWatchlist={handleToggleWatchlist}
                 watchlist={watchlist}
               />
             )}
 
+            {/* 8. Mi Cartera Mejorada (Posiciones Long/Short, P&L en vivo y Gráfico Multi-temporal) */}
             {currentTab === 'watchlist' && (
               <Watchlist
                 stocks={stocks}
@@ -255,11 +334,11 @@ export function App() {
 
       {/* Footer Institucional */}
       <footer className="footer">
-        <div style={{ maxWidth: '1440px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+        <div style={{ maxWidth: '1600px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--state-success)' }} />
             <span style={{ fontWeight: 600, color: '#fff' }}>Inversor Colombia</span>
-            <span>— Modelo Cuantitativo Factorial Seeking Alpha</span>
+            <span>— Modelo Cuantitativo Factorial & Comité de 4 Agentes de Inversión</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '0.78rem' }}>

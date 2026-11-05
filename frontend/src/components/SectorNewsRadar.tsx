@@ -6,7 +6,9 @@ import {
   Play, 
   Clock, 
   CheckCircle2,
-  MessageSquare
+  MessageSquare,
+  List,
+  LayoutGrid
 } from 'lucide-react';
 
 export interface NewsItem {
@@ -35,6 +37,7 @@ export const SectorNewsRadar: React.FC<SectorNewsRadarProps> = ({
   industry = 'General'
 }) => {
   const [activeTab, setActiveTab] = useState<'all' | 'news' | 'twitter' | 'youtube'>('all');
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [newsList, setNewsList] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -247,12 +250,110 @@ export const SectorNewsRadar: React.FC<SectorNewsRadarProps> = ({
             YouTube ({countYoutube})
           </button>
         </div>
+
+        {/* Selector de Vista: Lista vs Cuadrícula */}
+        <div style={{ display: 'flex', gap: '3px', background: 'var(--bg-surface)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+          <button 
+            className={`btn ${viewMode === 'list' ? 'btn-active' : 'btn-secondary'}`}
+            style={{ padding: '4px 9px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '5px' }}
+            onClick={() => setViewMode('list')}
+            title="Vista en Lista Estructurada"
+          >
+            <List size={13} />
+            Lista
+          </button>
+          <button 
+            className={`btn ${viewMode === 'grid' ? 'btn-active' : 'btn-secondary'}`}
+            style={{ padding: '4px 9px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '5px' }}
+            onClick={() => setViewMode('grid')}
+            title="Vista en Tarjetas"
+          >
+            <LayoutGrid size={13} />
+            Tarjetas
+          </button>
+        </div>
       </div>
 
-      {/* Grid de Contenido Multimedia */}
+      {/* Renderizado de Noticias: Lista vs Cuadrícula */}
       {loading ? (
         <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
           Consultando medios gratuitos, publicaciones en X y análisis en video...
+        </div>
+      ) : viewMode === 'list' ? (
+        <div className="table-container" style={{ borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
+          <table className="data-table" style={{ fontSize: '0.8rem' }}>
+            <thead>
+              <tr>
+                <th style={{ width: '120px' }}>Tipo</th>
+                <th>Titular / Contenido</th>
+                <th style={{ width: '180px' }}>Fuente / Portal</th>
+                <th style={{ width: '110px' }}>Fecha</th>
+                <th style={{ width: '100px', textAlign: 'center' }}>Enlace</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredItems.map(item => {
+                const isTwitter = item.type === 'twitter';
+                const isYoutube = item.type === 'youtube';
+
+                return (
+                  <tr key={item.id} className="data-row-hover">
+                    <td>
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        padding: '2px 7px',
+                        borderRadius: '4px',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        background: isTwitter ? 'rgba(56, 189, 248, 0.15)' : isYoutube ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                        color: isTwitter ? '#38bdf8' : isYoutube ? '#f87171' : 'var(--accent-green)'
+                      }}>
+                        {isTwitter ? <Share2 size={11} /> : isYoutube ? <Play size={11} /> : <Newspaper size={11} />}
+                        {isTwitter ? 'En X' : isYoutube ? 'YouTube' : 'Noticia'}
+                      </span>
+                    </td>
+                    <td>
+                      <a 
+                        href={item.url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        style={{ color: '#fff', textDecoration: 'none', fontWeight: 600, display: 'block', lineHeight: 1.4 }}
+                        onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-cyan)'}
+                        onMouseLeave={e => e.currentTarget.style.color = '#fff'}
+                      >
+                        {item.title}
+                      </a>
+                      {item.description && (
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '3px' }}>
+                          {item.description.slice(0, 110)}...
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>
+                      {item.publisher}
+                    </td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                      {item.publishedAt || 'Reciente'}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <a 
+                        href={item.url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="btn btn-secondary" 
+                        style={{ padding: '3px 8px', fontSize: '0.72rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        Abrir
+                        <ExternalLink size={11} />
+                      </a>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       ) : (
         <div style={{

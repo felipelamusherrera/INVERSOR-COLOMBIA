@@ -18,6 +18,7 @@ import { supabase } from '../lib/supabase';
 import { TradingViewChart } from './TradingViewChart';
 import { CandlestickChart } from './CandlestickChart';
 import { SectorNewsRadar } from './SectorNewsRadar';
+import { StockAIAnalysisPanel } from './StockAIAnalysisPanel';
 
 export interface PricePoint {
   date: string;
@@ -1435,7 +1436,10 @@ export const StockDetail: React.FC<StockDetailProps> = ({
         </div>
       </div>
 
-      {/* 4. Radar Multimedia: Noticias Gratuitas, Comunidad en X y Videos de YouTube */}
+      {/* 4. Apartado del Agente IA de Análisis Institucional (Estrategia de Inversión) */}
+      <StockAIAnalysisPanel stock={stock} />
+
+      {/* 5. Radar Multimedia: Noticias Gratuitas, Comunidad en X y Videos de YouTube */}
       <div id="radar-multimedia">
         <SectorNewsRadar 
           ticker={stock.ticker} 
