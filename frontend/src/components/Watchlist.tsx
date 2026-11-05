@@ -36,7 +36,7 @@ interface WatchlistProps {
   watchlist: string[];
   onToggleWatchlist: (ticker: string) => void;
   onSelectStock: (stock: StockRecord) => void;
-  onGoToScreener?: () => void;
+  onGoToScreener: () => void;
 }
 
 type PnlTimeframe = '1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | '2Y' | 'ALL';
@@ -46,7 +46,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
   watchlist,
   onToggleWatchlist,
   onSelectStock,
-  onGoToScreener: _onGoToScreener
+  onGoToScreener
 }) => {
   // Modal de Añadir Posición
   const [showAddModal, setShowAddModal] = useState(false);
@@ -227,7 +227,6 @@ export const Watchlist: React.FC<WatchlistProps> = ({
       const dateStr = d.toISOString().slice(0, 10);
       const displayStr = numDays <= 30 ? dateStr.slice(5) : dateStr.slice(2, 7);
 
-      // Curva suave de P&L acumulativo progresando hacia el P&L actual
       const progress = (numDays - i) / numDays;
       const noise = Math.sin(i * 0.4) * (currentPnl * 0.12);
       const simulatedPnl = Number(((currentPnl * (progress * 0.9 + 0.1)) + noise).toFixed(2));
@@ -263,6 +262,14 @@ export const Watchlist: React.FC<WatchlistProps> = ({
         </div>
 
         <div style={{ display: 'flex', gap: '10px' }}>
+          <button 
+            onClick={onGoToScreener} 
+            className="btn btn-secondary"
+            style={{ padding: '8px 14px', fontSize: '0.85rem' }}
+          >
+            <Eye size={15} />
+            Explorar Screener
+          </button>
           <button 
             id="btn-add-position"
             onClick={() => setShowAddModal(true)} 
@@ -439,7 +446,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                     <td style={{ color: '#fff', maxWidth: '180px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {pos.company}
                     </td>
-                    {/* Campo SECTOR añadido como solicitado */}
+                    {/* Campo SECTOR añadido */}
                     <td style={{ color: 'var(--text-secondary)' }}>
                       {pos.sector}
                     </td>
