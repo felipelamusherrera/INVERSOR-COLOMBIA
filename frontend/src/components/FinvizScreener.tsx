@@ -802,9 +802,9 @@ export const FinvizScreener: React.FC<FinvizScreenerProps> = ({ stocks, onSelect
                   {tableView === 'technical' && (
                     <>
                       <td className="font-mono" style={{ textAlign: 'right' }}>{stock.rsi ? stock.rsi.toFixed(1) : '—'}</td>
-                      <td className="font-mono" style={{ textAlign: 'right' }}>${stock.sma20 ? stock.sma20.toFixed(2) : '—'}</td>
-                      <td className="font-mono" style={{ textAlign: 'right' }}>${stock.sma50 ? stock.sma50.toFixed(2) : '—'}</td>
-                      <td className="font-mono" style={{ textAlign: 'right' }}>${stock.sma200 ? stock.sma200.toFixed(2) : '—'}</td>
+                      <td className="font-mono" style={{ textAlign: 'right' }}>{formatPct(stock.sma20)}</td>
+                      <td className="font-mono" style={{ textAlign: 'right' }}>{formatPct(stock.sma50)}</td>
+                      <td className="font-mono" style={{ textAlign: 'right' }}>{formatPct(stock.sma200)}</td>
                       <td className="font-mono" style={{ textAlign: 'right' }}>{stock.rel_volume ? `${stock.rel_volume.toFixed(2)}x` : '—'}</td>
                     </>
                   )}

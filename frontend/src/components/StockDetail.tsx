@@ -590,35 +590,105 @@ export const StockDetail: React.FC<StockDetailProps> = ({
         </div>
 
         {/* Barra de Rango 52 Semanas */}
-        {stock.w52_low && stock.w52_high && (
-          <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-              <span>Mínimo 52 Semanas: <strong>${stock.w52_low.toFixed(2)}</strong></span>
-              <span>Rango 52 Semanas</span>
-              <span>Máximo 52 Semanas: <strong>${stock.w52_high.toFixed(2)}</strong></span>
-            </div>
-            <div style={{
-              width: '100%',
-              height: '8px',
-              background: 'var(--bg-surface)',
-              borderRadius: '4px',
-              position: 'relative',
-              overflow: 'hidden'
-            }}>
-              {stock.price && (
+        {stock.price !== undefined && stock.price !== null && (stock.w52_low !== undefined || stock.w52_high !== undefined || stock.w52_range) && (() => {
+          // En Finviz, w52_low y w52_high vienen como distancia porcentual respecto al precio actual:
+          // Ejemplo PYPL ($58.96): w52_low = +53.30% (sobre el mínimo), w52_high = -13.56% (bajo el máximo)
+          // Fórmula exacta: Precio Base = Precio Actual / (1 + Porcentaje / 100)
+          let lowPrice: number | null = null;
+          let highPrice: number | null = null;
+
+          if (stock.w52_range && stock.w52_range.includes('-')) {
+            const parts = stock.w52_range.split('-').map(p => parseFloat(p.trim()));
+            if (!isNaN(parts[0]) && !isNaN(parts[1]) && parts[0] > 0 && parts[1] > 0) {
+              lowPrice = Math.min(parts[0], parts[1]);
+              highPrice = Math.max(parts[0], parts[1]);
+            }
+          }
+
+          if (lowPrice === null && stock.w52_low !== undefined && stock.w52_low !== null) {
+            const factorLow = 1 + (stock.w52_low / 100);
+            if (factorLow > 0) {
+              lowPrice = stock.price / factorLow;
+            }
+          }
+
+          if (highPrice === null && stock.w52_high !== undefined && stock.w52_high !== null) {
+            const factorHigh = 1 + (stock.w52_high / 100);
+            if (factorHigh > 0) {
+              highPrice = stock.price / factorHigh;
+            }
+          }
+
+          if (lowPrice === null || highPrice === null) return null;
+
+          const min52 = Math.min(lowPrice, highPrice);
+          const max52 = Math.max(lowPrice, highPrice);
+          const progressPct = max52 > min52
+            ? Math.min(100, Math.max(0, ((stock.price - min52) / (max52 - min52)) * 100))
+            : 50;
+
+          return (
+            <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid var(--border-subtle)' }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-end',
+                flexWrap: 'wrap',
+                gap: '8px',
+                fontSize: '0.78rem',
+                color: 'var(--text-muted)',
+                marginBottom: '8px'
+              }}>
+                <div>
+                  <div>Mínimo 52 Semanas</div>
+                  <strong className="font-mono" style={{ color: '#fff', fontSize: '0.88rem' }}>
+                    ${min52.toFixed(2)}
+                  </strong>
+                  {stock.w52_low !== undefined && stock.w52_low !== null && (
+                    <span className="delta-positive" style={{ fontSize: '0.72rem', marginLeft: '5px' }}>
+                      ({stock.w52_low >= 0 ? '+' : ''}{stock.w52_low.toFixed(1)}%)
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                  Rango 52S ({progressPct.toFixed(0)}%)
+                </div>
+
+                <div style={{ textAlign: 'right' }}>
+                  <div>Máximo 52 Semanas</div>
+                  <strong className="font-mono" style={{ color: '#fff', fontSize: '0.88rem' }}>
+                    ${max52.toFixed(2)}
+                  </strong>
+                  {stock.w52_high !== undefined && stock.w52_high !== null && (
+                    <span className={stock.w52_high >= 0 ? 'delta-positive' : 'delta-negative'} style={{ fontSize: '0.72rem', marginLeft: '5px' }}>
+                      ({stock.w52_high >= 0 ? '+' : ''}{stock.w52_high.toFixed(1)}%)
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div style={{
+                width: '100%',
+                height: '8px',
+                background: 'var(--bg-surface)',
+                borderRadius: '4px',
+                position: 'relative',
+                overflow: 'hidden'
+              }}>
                 <div style={{
                   position: 'absolute',
                   top: 0,
                   bottom: 0,
                   left: 0,
-                  width: `${Math.min(100, Math.max(0, ((stock.price - stock.w52_low) / (stock.w52_high - stock.w52_low)) * 100))}%`,
+                  width: `${progressPct}%`,
                   background: 'linear-gradient(90deg, #10b981, #06b6d4)',
                   borderRadius: '4px'
                 }} />
-              )}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* 1. TERMINAL DUAL: Gráfico Cuantitativo Local & TradingView Pro (Al Inicio, Encima de Factor Grades) */}

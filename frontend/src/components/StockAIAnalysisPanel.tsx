@@ -308,11 +308,19 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: 'var(--text-muted)' }}>Soporte Dinámico SMA50:</span>
-                  <span className="font-mono" style={{ fontWeight: 700, color: '#fff' }}>${stock.sma50 ? stock.sma50.toFixed(2) : '—'}</span>
+                  <span className="font-mono" style={{ fontWeight: 700, color: '#fff' }}>
+                    {stock.price && stock.sma50 !== undefined && stock.sma50 !== null && (1 + stock.sma50 / 100) > 0
+                      ? `$${(stock.price / (1 + stock.sma50 / 100)).toFixed(2)} (${stock.sma50 >= 0 ? '+' : ''}${stock.sma50.toFixed(1)}%)`
+                      : '—'}
+                  </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: 'var(--text-muted)' }}>Soporte Estructural SMA200:</span>
-                  <span className="font-mono" style={{ fontWeight: 700, color: '#fff' }}>${stock.sma200 ? stock.sma200.toFixed(2) : '—'}</span>
+                  <span className="font-mono" style={{ fontWeight: 700, color: '#fff' }}>
+                    {stock.price && stock.sma200 !== undefined && stock.sma200 !== null && (1 + stock.sma200 / 100) > 0
+                      ? `$${(stock.price / (1 + stock.sma200 / 100)).toFixed(2)} (${stock.sma200 >= 0 ? '+' : ''}${stock.sma200.toFixed(1)}%)`
+                      : '—'}
+                  </span>
                 </div>
               </div>
             </div>
