@@ -356,3 +356,26 @@ body {
   min-height: 600px !important;
   width: 100% !important;
 }
+
+/* Optimización Móvil (Smartphones & Tablets) */
+@media (max-width: 900px) {
+  .navbar-top-bar {
+    padding: 10px 12px !important;
+    gap: 10px !important;
+  }
+  .navbar-search-box {
+    width: 100% !important;
+    order: 3;
+  }
+  .navbar-top-bar nav {
+    width: 100%;
+    order: 4;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tradingview-widget-container,
+  .tradingview-widget-container iframe {
+    min-height: 420px !important;
+  }
+}
+

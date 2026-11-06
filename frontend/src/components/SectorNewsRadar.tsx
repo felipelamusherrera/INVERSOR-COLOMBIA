@@ -49,9 +49,13 @@ export const SectorNewsRadar: React.FC<SectorNewsRadarProps> = ({
       const items: NewsItem[] = [];
 
       try {
-        // 1. Obtener noticias de portales gratuitos via proxy /api/news (Yahoo Finance Search)
-        const res = await fetch(`/api/news?q=${ticker}&newsCount=6`);
-        if (res.ok) {
+        // 1. Obtener noticias de portales gratuitos via proxy /api/news (o fallback en producción GitHub Pages)
+        let res = await fetch(`/api/news?q=${ticker}&newsCount=6`).catch(() => null);
+        if (!res || !res.ok || !(res.headers.get('content-type') || '').includes('json')) {
+          const targetUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=6`;
+          res = await fetch(`https://corsproxy.io/?${encodeURIComponent(targetUrl)}`).catch(() => null);
+        }
+        if (res && res.ok) {
           const data = await res.json();
           const rawNews = data?.news || [];
 

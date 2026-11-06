@@ -16,7 +16,7 @@ dist/
 # Datos locales y logs
 data/
 *.csv
-*.json
+data/*.json
 *.log
 
 # Entornos y temporales de Python

@@ -104,15 +104,16 @@ export const Navbar: React.FC<NavbarProps> = ({
       borderBottom: '1px solid var(--border-subtle)'
     }}>
       {/* 1. Barra Principal Superior */}
-      <div style={{
+      <div className="navbar-top-bar" style={{
         maxWidth: '1600px',
         margin: '0 auto',
-        height: '66px',
-        padding: '0 24px',
+        minHeight: '66px',
+        padding: '8px 24px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: '16px'
+        gap: '12px',
+        flexWrap: 'wrap'
       }}>
         {/* Logo / Marca */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flexShrink: 0 }} onClick={() => setCurrentTab('dashboard')}>
@@ -152,7 +153,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Buscador Rápido de Tickers (No cierra pestañas previas al seleccionar) */}
-        <div style={{ position: 'relative', width: '260px', flexShrink: 0 }}>
+        <div className="navbar-search-box" style={{ position: 'relative', width: '260px', flexShrink: 0 }}>
           <div style={{
             display: 'flex',
             alignItems: 'center',

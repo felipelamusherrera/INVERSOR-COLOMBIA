@@ -343,9 +343,13 @@ export const StockDetail: React.FC<StockDetailProps> = ({
           return;
         }
 
-        // 2. Si no hay en Supabase o es primera vez, consultar via proxy /api/chart (Yahoo Finance v8 3Y)
-        const res = await fetch(`/api/chart/${stock.ticker}?range=3y&interval=1d`);
-        if (res.ok) {
+        // 2. Si no hay en Supabase o es primera vez, consultar via proxy /api/chart (o fallback en GitHub Pages)
+        let res = await fetch(`/api/chart/${stock.ticker}?range=3y&interval=1d`).catch(() => null);
+        if (!res || !res.ok || !(res.headers.get('content-type') || '').includes('json')) {
+          const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(stock.ticker)}?range=3y&interval=1d`;
+          res = await fetch(`https://corsproxy.io/?${encodeURIComponent(targetUrl)}`).catch(() => null);
+        }
+        if (res && res.ok) {
           const json = await res.json();
           const result = json?.chart?.result?.[0];
           const timestamps: number[] = result?.timestamp || [];
