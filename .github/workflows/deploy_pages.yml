@@ -39,20 +39,3 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./frontend/dist
 
-      - name: Setup Pages (GitHub Actions mode)
-        id: pages_setup
-        continue-on-error: true
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
-
-      - name: Upload Pages artifact
-        if: steps.pages_setup.outcome == 'success'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './frontend/dist'
-
-      - name: Deploy to GitHub Pages (GitHub Actions mode)
-        if: steps.pages_setup.outcome == 'success'
-        id: deployment
-        uses: actions/deploy-pages@v4
