@@ -149,179 +149,6 @@ function computeRSI(prices: number[], period = 14): (number | undefined)[] {
   return rsi;
 }
 
-// Genera serie histórica diaria de 3 años (756 sesiones bursátiles) matemáticamente coherente con los ratios de Finviz
-export function generateSyntheticPriceHistory(stock: StockRecord, count = 756): PricePoint[] {
-  const currentPrice = Number(stock.price && stock.price > 0 ? stock.price : 100);
-  const perfWeek = stock.perf_week;
-  const perfMonth = stock.perf_month;
-  const perfQuart = stock.perf_quart;
-  const perfHalf = stock.perf_half;
-  const perfYear = stock.perf_year;
-  const perf3y = stock.perf_3y;
-  const beta = Number(stock.beta && stock.beta > 0 ? stock.beta : 1.15);
-  const baseVol = Number(stock.volume && stock.volume > 0 ? stock.volume : (stock.avg_volume && stock.avg_volume > 0 ? stock.avg_volume : 2000000));
-
-  // Semilla pseudo-aleatoria determinista basada en el ticker para consistencia total entre recargas
-  let seed = 0;
-  for (let i = 0; i < (stock.ticker || '').length; i++) {
-    seed = (seed * 31 + stock.ticker.charCodeAt(i)) % 100000;
-  }
-  const pseudoRand = (offset: number) => {
-    const x = Math.sin(seed + offset) * 10000;
-    return x - Math.floor(x);
-  };
-
-  // 1. Generar fechas hábiles (Lunes a Viernes) hacia atrás
-  const dates: string[] = [];
-  let curr = new Date(stock.snapshot_date ? stock.snapshot_date : new Date());
-  if (isNaN(curr.getTime())) curr = new Date();
-
-  // Asegurar que si la fecha ancla cae en fin de semana, retroceda al viernes hábil
-  while (curr.getDay() === 0 || curr.getDay() === 6) {
-    curr.setDate(curr.getDate() - 1);
-  }
-
-  while (dates.length < count) {
-    const dayOfWeek = curr.getDay();
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-      dates.push(curr.toISOString().slice(0, 10));
-    }
-    curr.setDate(curr.getDate() - 1);
-  }
-  dates.reverse();
-
-  // 2. Establecer precios ancla según rendimiento Finviz
-  const anchors: { [index: number]: number } = {};
-  const lastIdx = count - 1;
-
-  // Hoy (índice 755)
-  anchors[lastIdx] = currentPrice;
-
-  // Ayer (índice 754)
-  const pPrev = stock.prev_close && stock.prev_close > 0
-    ? stock.prev_close
-    : (stock.change_pct !== undefined && (1 + stock.change_pct / 100) > 0
-        ? currentPrice / (1 + stock.change_pct / 100)
-        : currentPrice * 0.995);
-  anchors[Math.max(0, lastIdx - 1)] = Math.max(0.01, pPrev);
-
-  // 1 Semana (~5 sesiones)
-  anchors[Math.max(0, lastIdx - 5)] = Math.max(0.01, (perfWeek !== undefined && perfWeek !== null && (1 + perfWeek / 100) > 0)
-    ? currentPrice / (1 + perfWeek / 100)
-    : currentPrice * 0.99);
-
-  // 1 Mes (~21 sesiones)
-  anchors[Math.max(0, lastIdx - 21)] = Math.max(0.01, (perfMonth !== undefined && perfMonth !== null && (1 + perfMonth / 100) > 0)
-    ? currentPrice / (1 + perfMonth / 100)
-    : currentPrice * 0.97);
-
-  // 3 Meses (~63 sesiones)
-  anchors[Math.max(0, lastIdx - 63)] = Math.max(0.01, (perfQuart !== undefined && perfQuart !== null && (1 + perfQuart / 100) > 0)
-    ? currentPrice / (1 + perfQuart / 100)
-    : currentPrice * 0.94);
-
-  // 6 Meses (~126 sesiones)
-  anchors[Math.max(0, lastIdx - 126)] = Math.max(0.01, (perfHalf !== undefined && perfHalf !== null && (1 + perfHalf / 100) > 0)
-    ? currentPrice / (1 + perfHalf / 100)
-    : currentPrice * 0.90);
-
-  // 1 Año (~252 sesiones)
-  const p1y = Math.max(0.01, (perfYear !== undefined && perfYear !== null && (1 + perfYear / 100) > 0)
-    ? currentPrice / (1 + perfYear / 100)
-    : currentPrice * 0.85);
-  anchors[Math.max(0, lastIdx - 252)] = p1y;
-
-  // 3 Años (~756 sesiones, índice 0)
-  const p3y = Math.max(0.01, (perf3y !== undefined && perf3y !== null && (1 + perf3y / 100) > 0)
-    ? currentPrice / (1 + perf3y / 100)
-    : p1y * 0.70);
-  anchors[0] = p3y;
-
-  // 2 Años intermedio (~504 sesiones)
-  anchors[Math.max(0, lastIdx - 504)] = Math.sqrt(p1y * p3y);
-
-  // 3. Interpolar la serie mediante puente browniano logarítmico con volatilidad
-  const sortedAnchors = Object.keys(anchors).map(Number).sort((a, b) => a - b);
-  const dailyVol = Math.max(0.008, Math.min(0.035, 0.012 * beta));
-  const closes: number[] = new Array(count).fill(currentPrice);
-
-  for (let a = 0; a < sortedAnchors.length - 1; a++) {
-    const idxA = sortedAnchors[a];
-    const idxB = sortedAnchors[a + 1];
-    const pA = Math.max(0.01, anchors[idxA]);
-    const pB = Math.max(0.01, anchors[idxB]);
-    const span = idxB - idxA;
-    if (span <= 0) continue;
-
-    let arNoise = 0.0;
-    for (let i = idxA; i <= idxB; i++) {
-      const u = (i - idxA) / span;
-      const logTrend = (1 - u) * Math.log(pA) + u * Math.log(pB);
-      const envelope = Math.sqrt(Math.max(0, u * (1 - u))) * 2.0;
-      const rawR = (pseudoRand(i * 13 + 7) - 0.5) * 2.0;
-      arNoise = arNoise * 0.65 + rawR * 0.35;
-      const noise = arNoise * dailyVol * envelope * Math.sqrt(span / 20.0);
-      closes[i] = Number(Math.exp(logTrend + noise).toFixed(2));
-    }
-  }
-
-  // Garantizar valores exactos en los anclas
-  for (const idxStr of Object.keys(anchors)) {
-    const idx = Number(idxStr);
-    closes[idx] = Number(anchors[idx].toFixed(2));
-  }
-
-  // 4. Calcular RSI sobre los precios de cierre generados
-  const calculatedRsi = computeRSI(closes);
-
-  // 5. Construir los PricePoint con OHLCV completo
-  const points: PricePoint[] = [];
-  for (let i = 0; i < count; i++) {
-    const cl = closes[i];
-    const isToday = (i === lastIdx);
-
-    let op: number;
-    let hi: number;
-    let lo: number;
-    let vol: number;
-    let rsiVal = calculatedRsi[i];
-
-    if (isToday) {
-      op = stock.open && stock.open > 0 ? stock.open : cl;
-      hi = stock.high && stock.high > 0 ? Math.max(stock.high, cl, op) : Math.max(cl, op);
-      lo = stock.low && stock.low > 0 ? Math.min(stock.low, cl, op) : Math.min(cl, op);
-      vol = stock.volume && stock.volume > 0 ? stock.volume : baseVol;
-      if (stock.rsi !== undefined && stock.rsi !== null) {
-        rsiVal = stock.rsi;
-      }
-    } else {
-      const prevCl = i > 0 ? closes[i - 1] : cl;
-      const gap = (pseudoRand(i * 17 + 3) - 0.5) * 0.006;
-      op = Number((prevCl * (1 + gap)).toFixed(2));
-      const wickHigh = Math.abs(cl * dailyVol * (0.3 + pseudoRand(i * 19 + 5) * 0.7));
-      const wickLow = Math.abs(cl * dailyVol * (0.3 + pseudoRand(i * 23 + 2) * 0.7));
-      hi = Number((Math.max(op, cl) + wickHigh).toFixed(2));
-      lo = Number((Math.min(op, cl) - wickLow).toFixed(2));
-      vol = Math.round(baseVol * (0.60 + pseudoRand(i * 29 + 11) * 0.80));
-    }
-
-    const dt = dates[i];
-    points.push({
-      date: dt,
-      displayDate: dt.slice(5),
-      price: cl,
-      open: op,
-      high: hi,
-      low: lo,
-      close: cl,
-      rsi: rsiVal,
-      volume: vol
-    });
-  }
-
-  return points;
-}
-
 // Reconstruye series fundamentales trimestrales y volumen en millones de USD
 function computeHistoricalFundamentals(points: PricePoint[], stock: StockRecord): PricePoint[] {
   if (!points || points.length === 0) return [];
@@ -639,20 +466,20 @@ export const StockDetail: React.FC<StockDetailProps> = ({
     localStorage.setItem('inversor_colombia_alerts', JSON.stringify(updated));
   };
 
-  // Cargar histórico de 3 años para este ticker (Escenario B)
+  // Cargar histórico de 3 años para este ticker (Datos 100% Reales de Supabase / Yahoo Finance)
   useEffect(() => {
     let isMounted = true;
     async function loadHistoricalData() {
       setLoadingHistory(true);
       try {
-        // 1. Intentar consultar stock_prices_history en Supabase
+        // 1. Consultar stock_prices_history en Supabase (precargado con los 3 años de Yahoo Finance)
         const { data: dbData, error: dbError } = await supabase
           .from('stock_prices_history')
           .select('*')
           .eq('ticker', stock.ticker)
           .order('price_date', { ascending: true });
 
-        if (!dbError && dbData && dbData.length >= 20) {
+        if (!dbError && dbData && dbData.length > 0) {
           if (!isMounted) return;
           const validCloses = dbData.map((d: any) => Number(d.close_price));
           const calculatedRsi = computeRSI(validCloses);
@@ -672,7 +499,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
           return;
         }
 
-        // 2. Si hay proxy local disponible (/api/chart), intentar obtener datos reales de Yahoo Finance
+        // 2. Si hay proxy local disponible (/api/chart en desarrollo), obtener datos reales de Yahoo Finance
         try {
           const res = await fetch(`/api/chart/${stock.ticker}?range=3y&interval=1d`).catch(() => null);
           if (res && res.ok && (res.headers.get('content-type') || '').includes('json')) {
@@ -695,7 +522,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
               }
             }
 
-            if (validIndices.length >= 20) {
+            if (validIndices.length > 0) {
               const calculatedRsi = computeRSI(validCloses);
               const pts: PricePoint[] = validIndices.map((idx, i) => {
                 const dt = new Date(timestamps[idx] * 1000).toISOString().slice(0, 10);
@@ -721,7 +548,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
               const enriched = computeHistoricalFundamentals(pts, stock);
               setRawPoints(enriched);
 
-              // Guardar en Supabase en segundo plano para enriquecer la tabla histórica
+              // Guardar en Supabase en segundo plano
               try {
                 const toInsert = pts.map(p => ({
                   ticker: stock.ticker,
@@ -737,57 +564,41 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                   await supabase.from('stock_prices_history').upsert(toInsert.slice(b, b + 200), { onConflict: 'ticker,price_date' });
                 }
               } catch {
-                // Silencioso si la tabla tiene restricciones
+                // Silencioso
               }
               return;
             }
           }
         } catch {
-          // Si falla el fetch local, continuar con snapshots y serie calibrada
+          // Continuar con snapshots reales en Supabase
         }
 
-        // 3. Consultar si hay snapshots diarios en inversor_colombia_stocks
+        // 3. Consultar snapshots diarios reales en inversor_colombia_stocks
         const { data: snapData } = await supabase
           .from('inversor_colombia_stocks')
           .select('snapshot_date, price, open, high, low, volume, rsi')
           .eq('ticker', stock.ticker)
           .order('snapshot_date', { ascending: true });
 
-        // 4. Generar la serie histórica matemática completa (756 sesiones bursátiles = 3 años)
-        const synthPoints = generateSyntheticPriceHistory(stock);
-
-        // Si tenemos snapshots reales en Supabase, sobreponer los días conocidos
-        if (snapData && snapData.length > 0) {
-          const snapMap = new Map<string, any>();
-          for (const s of snapData) {
-            if (s.snapshot_date && s.price) {
-              snapMap.set(s.snapshot_date, s);
-            }
-          }
-          for (let i = 0; i < synthPoints.length; i++) {
-            const dt = synthPoints[i].date;
-            const realSnap = snapMap.get(dt);
-            if (realSnap) {
-              synthPoints[i].price = Number(realSnap.price);
-              synthPoints[i].close = Number(realSnap.price);
-              if (realSnap.open) synthPoints[i].open = Number(realSnap.open);
-              if (realSnap.high) synthPoints[i].high = Number(realSnap.high);
-              if (realSnap.low) synthPoints[i].low = Number(realSnap.low);
-              if (realSnap.volume) synthPoints[i].volume = Number(realSnap.volume);
-              if (realSnap.rsi) synthPoints[i].rsi = Number(realSnap.rsi);
-            }
-          }
+        if (snapData && snapData.length > 0 && isMounted) {
+          const pts: PricePoint[] = snapData
+            .filter((s: any) => s.snapshot_date && s.price)
+            .map((s: any) => ({
+              date: s.snapshot_date,
+              displayDate: s.snapshot_date.slice(5),
+              price: Number(s.price),
+              open: s.open ? Number(s.open) : Number(s.price),
+              high: s.high ? Number(s.high) : Number(s.price),
+              low: s.low ? Number(s.low) : Number(s.price),
+              close: Number(s.price),
+              rsi: s.rsi !== null && s.rsi !== undefined ? Number(s.rsi) : undefined,
+              volume: s.volume ? Number(s.volume) : undefined
+            }));
+          const enriched = computeHistoricalFundamentals(pts, stock);
+          setRawPoints(enriched);
         }
-
-        if (!isMounted) return;
-        const enriched = computeHistoricalFundamentals(synthPoints, stock);
-        setRawPoints(enriched);
       } catch (err) {
         console.error('Error fetching prices history:', err);
-        if (isMounted) {
-          const fallback = computeHistoricalFundamentals(generateSyntheticPriceHistory(stock), stock);
-          setRawPoints(fallback);
-        }
       } finally {
         if (isMounted) setLoadingHistory(false);
       }
@@ -795,13 +606,11 @@ export const StockDetail: React.FC<StockDetailProps> = ({
 
     loadHistoricalData();
     return () => { isMounted = false; };
-  }, [stock.ticker, stock.snapshot_date, stock.price]);
+  }, [stock.ticker]);
 
-  // Filtrar los puntos según la ventana temporal seleccionada (garantiza siempre serie completa)
+  // Filtrar los puntos según la ventana temporal seleccionada
   const chartData = useMemo<PricePoint[]>(() => {
-    const pointsToUse = (rawPoints && rawPoints.length >= 20)
-      ? rawPoints
-      : computeHistoricalFundamentals(generateSyntheticPriceHistory(stock), stock);
+    if (!rawPoints || rawPoints.length === 0) return [];
 
     let days = 252; // 1Y por defecto
     if (timeframe === '1M') days = 22;
@@ -809,12 +618,12 @@ export const StockDetail: React.FC<StockDetailProps> = ({
     else if (timeframe === '1Y') days = 252;
     else if (timeframe === '3Y') days = 756;
 
-    const slice = pointsToUse.slice(-days);
+    const slice = rawPoints.slice(-days);
     return slice.map(s => ({
       ...s,
       displayDate: (timeframe === '1Y' || timeframe === '3Y') ? s.date.slice(2, 7) : s.date.slice(5)
     }));
-  }, [rawPoints, timeframe, stock]);
+  }, [rawPoints, timeframe]);
 
   // Retorno porcentual de la ventana temporal seleccionada
   const timeframeReturn = useMemo(() => {

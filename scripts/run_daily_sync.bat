@@ -13,4 +13,7 @@ echo [%date% %time%] Iniciando sincronizacion diaria... >> "%PROJECT_DIR%\data\s
 
 "%UV_BIN%" run .agents/skills/finviz-inversor-colombia/scripts/finviz_sync.py sync --min-market-cap 1000 --retention-days 30 >> "%PROJECT_DIR%\data\sync.log" 2>&1
 
+"%UV_BIN%" run scripts/sync_prices_history.py --mode auto --workers 16 >> "%PROJECT_DIR%\data\sync.log" 2>&1
+
 echo [%date% %time%] Sincronizacion finalizada. >> "%PROJECT_DIR%\data\sync.log"
+

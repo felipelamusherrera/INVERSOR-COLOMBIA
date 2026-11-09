@@ -22,9 +22,17 @@ jobs:
         with:
           version: "latest"
 
-      - name: Ejecutar Sincronización Diaria
+      - name: Ejecutar Sincronización Diaria Finviz
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           uv run .agents/skills/finviz-inversor-colombia/scripts/finviz_sync.py sync --min-market-cap 1000 --retention-days 30
+
+      - name: Sincronización Incremental de Precios Históricos (Yahoo Finance)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          uv run scripts/sync_prices_history.py --mode auto --workers 16
+
