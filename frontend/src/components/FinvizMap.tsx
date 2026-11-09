@@ -12,6 +12,30 @@ interface FinvizMapProps {
 
 type DataType = 'perf_day' | 'perf_week' | 'perf_month' | 'perf_ytd' | 'pe' | 'rsi';
 
+// Helper para normalizar Market Cap a millones de USD ($M)
+// En la base de datos Supabase, market_cap viene en dólares absolutos (ej. 2,000,000,000 para $2B).
+// Si supera 1,000,000, se divide por 1e6 para llevarlo a millones.
+const getCapInMillions = (cap?: number): number => {
+  if (!cap || cap <= 0) return 0;
+  if (cap > 1000000) return cap / 1000000;
+  return cap;
+};
+
+// Clasificador oficial de tiers de capitalización según Finviz:
+// Large / Mega: >= $10B (>= $10,000M)
+// Mid: $2B a $10B ($2,000M a $10,000M)
+// Small: $300M a $2B ($300M a $2,000M)
+// Micro: $50M a $300M ($50M a $300M)
+// Nano: < $50M (< $50M)
+const getTier = (cap?: number): 'megaLarge' | 'mid' | 'small' | 'micro' | 'nano' => {
+  const capM = getCapInMillions(cap);
+  if (capM >= 10000) return 'megaLarge';
+  if (capM >= 2000) return 'mid';
+  if (capM >= 300) return 'small';
+  if (capM >= 50) return 'micro';
+  return 'nano';
+};
+
 export const FinvizMap: React.FC<FinvizMapProps> = ({ stocks, onSelectStock }) => {
   const [dataType, setDataType] = useState<DataType>('perf_day');
   const [selectedSector, setSelectedSector] = useState<string>('All');
@@ -46,11 +70,11 @@ export const FinvizMap: React.FC<FinvizMapProps> = ({ stocks, onSelectStock }) =
   const tierCounts = useMemo(() => {
     let megaLarge = 0, mid = 0, small = 0, micro = 0, nano = 0;
     stocks.forEach(st => {
-      const mc = st.market_cap || 0;
-      if (mc >= 10000) megaLarge++;
-      else if (mc >= 2000) mid++;
-      else if (mc >= 300) small++;
-      else if (mc >= 50) micro++;
+      const tier = getTier(st.market_cap);
+      if (tier === 'megaLarge') megaLarge++;
+      else if (tier === 'mid') mid++;
+      else if (tier === 'small') small++;
+      else if (tier === 'micro') micro++;
       else nano++;
     });
     return { megaLarge, mid, small, micro, nano };
@@ -68,12 +92,12 @@ export const FinvizMap: React.FC<FinvizMapProps> = ({ stocks, onSelectStock }) =
       if (selectedSector !== 'All' && st.sector !== selectedSector) return false;
       if (selectedIndustry !== 'All' && st.industry !== selectedIndustry) return false;
 
-      const mc = st.market_cap || 0;
-      if (!tierMegaLarge && mc >= 10000) return false;
-      if (!tierMid && mc >= 2000 && mc < 10000) return false;
-      if (!tierSmall && mc >= 300 && mc < 2000) return false;
-      if (!tierMicro && mc >= 50 && mc < 300) return false;
-      if (!tierNano && mc < 50) return false;
+      const tier = getTier(st.market_cap);
+      if (!tierMegaLarge && tier === 'megaLarge') return false;
+      if (!tierMid && tier === 'mid') return false;
+      if (!tierSmall && tier === 'small') return false;
+      if (!tierMicro && tier === 'micro') return false;
+      if (!tierNano && tier === 'nano') return false;
 
       return true;
     });
@@ -98,11 +122,11 @@ export const FinvizMap: React.FC<FinvizMapProps> = ({ stocks, onSelectStock }) =
       }
 
       const row = indMap.get(ind)!;
-      const mc = st.market_cap || 0;
-      if (mc >= 10000) row.megaLarge.push(st);
-      else if (mc >= 2000) row.mid.push(st);
-      else if (mc >= 300) row.small.push(st);
-      else if (mc >= 50) row.micro.push(st);
+      const tier = getTier(st.market_cap);
+      if (tier === 'megaLarge') row.megaLarge.push(st);
+      else if (tier === 'mid') row.mid.push(st);
+      else if (tier === 'small') row.small.push(st);
+      else if (tier === 'micro') row.micro.push(st);
       else row.nano.push(st);
     });
 
