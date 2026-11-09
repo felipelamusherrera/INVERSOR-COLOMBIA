@@ -95,9 +95,13 @@ Para cada accion del Top 3, evalua las 5 dimensiones observables e integra la le
 - **4. Resistencias y Targets (`R:R >= 2.5:1` o `>= 2.0:1` segun VIX).**
 - **5. Regla de Gestion Dinamica (*Trailing Stop* a *breakeven* en Target 1 rumbo a Target 2).**
 
-### 6. Generacion del PDF (`comparativo dd-mm-yy.pdf`) y Guardado en Google Drive
+### 6. Presentación del Informe: Formato Revista de Finanzas Inmerso en el Aplicativo y Respaldo Opcional en PDF
 
-Genera el PDF con el nombre exacto **`comparativo dd-mm-yy.pdf`** en orientacion horizontal A4 de 2 paginas (formato estandar `Georgia`/`Arial`), incluyendo en la tabla del **Paso 1 (SCAN)** y del **Paso 2 (ANALYZE)** el **Valor Intrinseco (`IV`), el `% de Descuento (umbral obligatorio >= 20%)` y el `Ratio P/IV (<= 0.80x)`** de cada accion evaluada, muestralo con `google:show_file` y subelo a `Geminifinanzas/<mes-ano>`.
+Presenta el informe comparativo directamente en el módulo **"Estrategia IA Inversor"** del aplicativo web en formato interactivo de artículo de revista de finanzas de alta legibilidad, estructurado en:
+1. **Paso 0:** Termómetro Macro (SPY, QQQ, IWM, VIX) y Matriz de Ranking de ETFs Sectoriales con clasificación de flujo (Líderes de Impulso, Fuerza Relativa, Acumulación Selectiva, Divergencias).
+2. **Paso 1:** Tabla comparativa SCAN de mínimo 8-9 acciones evaluadas, destacando Valor Intrínseco (`IV`), `% de Descuento (umbral obligatorio >= 20%)` y `Ratio P/IV (<= 0.80x)`.
+3. **Paso 2:** Análisis y Convergencia en 3 columnas para los Top 3 candidatos evaluando las 6 dimensiones fundamentales (Tendencia, Flujo Institucional, Soportes/Stop Loss, Resistencias/Targets R:R >= 2.5:1, Trailing Stop a Breakeven y Tramo de Convicción $45, $30 o $15 USD).
+Opcionalmente, puede generarse el PDF con el nombre exacto `comparativo dd-mm-yy.pdf` para archivado histórico en Google Drive bajo `Geminifinanzas/<mes-ano>`.
 
 ## Gotchas
 

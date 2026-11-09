@@ -361,15 +361,39 @@ interface StockDetailProps {
   onBack: () => void;
   onToggleWatchlist: (ticker: string) => void;
   isWatchlisted: boolean;
+  allStocks?: StockRecord[];
 }
 
 export const StockDetail: React.FC<StockDetailProps> = ({
   stock,
   onBack,
   onToggleWatchlist,
-  isWatchlisted
+  isWatchlisted,
+  allStocks
 }) => {
   const analysis = calculateFactorGrades(stock);
+
+  // Próxima Fecha de Dividendo (Ex-Dividendo) calculada o proyectada
+  const nextDividendDateStr = useMemo(() => {
+    if (!stock.dividend || stock.dividend <= 0) return null;
+    
+    // Proyección del próximo ciclo trimestral de dividendo
+    const now = new Date();
+    const currentMonth = now.getMonth(); // 0-11
+    const currentYear = now.getFullYear();
+
+    // Meses de pago del ciclo trimestral (Mar, Jun, Sep, Dic)
+    const cycle = [2, 5, 8, 11];
+    let targetMonth = cycle.find(m => m >= currentMonth);
+    let targetYear = currentYear;
+    if (targetMonth === undefined) {
+      targetMonth = cycle[0];
+      targetYear = currentYear + 1;
+    }
+    
+    const targetDate = new Date(targetYear, targetMonth, 15);
+    return targetDate.toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' }) + ' (Est.)';
+  }, [stock.dividend]);
 
   // Estados de Terminal Dual
   const [terminalMode, setTerminalMode] = useState<'local' | 'tradingview'>('local');
@@ -739,6 +763,34 @@ export const StockDetail: React.FC<StockDetailProps> = ({
               <span>Sector: <strong style={{ color: 'var(--text-primary)' }}>{stock.sector || '-'}</strong></span>
               <span>·</span>
               <span>Industria: <strong style={{ color: 'var(--text-primary)' }}>{stock.industry || '-'}</strong></span>
+            </div>
+
+            {/* Próxima Fecha de Dividendo si la hay */}
+            <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{
+                background: stock.dividend && stock.dividend > 0 ? 'rgba(16, 185, 129, 0.10)' : 'rgba(255, 255, 255, 0.04)',
+                border: stock.dividend && stock.dividend > 0 ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid var(--border-subtle)',
+                borderRadius: '8px',
+                padding: '6px 12px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.80rem'
+              }}>
+                <span style={{ color: 'var(--text-muted)' }}>Dividendo:</span>
+                <strong className="font-mono" style={{ color: stock.dividend && stock.dividend > 0 ? 'var(--accent-green)' : 'var(--text-secondary)' }}>
+                  {stock.dividend && stock.dividend > 0 ? `${stock.dividend.toFixed(2)}% Rentabilidad` : 'No distribuye (0.00%)'}
+                </strong>
+                {stock.dividend && stock.dividend > 0 && nextDividendDateStr && (
+                  <>
+                    <span style={{ color: 'rgba(255,255,255,0.2)' }}>•</span>
+                    <span style={{ color: 'var(--text-muted)' }}>Próxima Fecha (Ex-Div):</span>
+                    <strong style={{ color: 'var(--accent-cyan)' }}>
+                      {nextDividendDateStr}
+                    </strong>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1826,7 +1878,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
       </div>
 
       {/* 4. Apartado del Agente IA de Análisis Institucional (Estrategia de Inversión) */}
-      <StockAIAnalysisPanel stock={stock} />
+      <StockAIAnalysisPanel stock={stock} allStocks={allStocks} />
 
       {/* 5. Radar Multimedia: Noticias Gratuitas, Comunidad en X y Videos de YouTube */}
       <div id="radar-multimedia">

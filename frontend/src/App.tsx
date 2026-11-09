@@ -295,6 +295,7 @@ export function App() {
                 onBack={() => setCurrentTab('screener')}
                 onToggleWatchlist={handleToggleWatchlist}
                 isWatchlisted={watchlist.includes(currentActiveStock.ticker)}
+                allStocks={stocks}
               />
             )}
 
