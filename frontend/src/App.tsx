@@ -8,7 +8,6 @@ import { StockScreener } from './components/StockScreener';
 import { StockDetail } from './components/StockDetail';
 import { PeersComparison } from './components/PeersComparison';
 import { Watchlist } from './components/Watchlist';
-import { FinvizScreener } from './components/FinvizScreener';
 import { FinvizMap } from './components/FinvizMap';
 import { StrategyAIModule } from './components/StrategyAIModule';
 import { Toaster, toast } from 'sonner';
@@ -262,20 +261,12 @@ export function App() {
               />
             )}
 
-            {/* 2. Screener Cuantitativo Clásico */}
-            {currentTab === 'screener' && (
+            {/* 2. Screener Acciones Unificado (Finviz Filters + Screener Quant Styling) */}
+            {(currentTab === 'screener' || currentTab === 'finviz-screener') && (
               <StockScreener
                 stocks={stocks}
                 onSelectStock={handleSelectStock}
                 selectedStock={currentActiveStock}
-              />
-            )}
-
-            {/* 3. NUEVO MÓDULO: Screener Estilo Finviz (Imagen 2) */}
-            {currentTab === 'finviz-screener' && (
-              <FinvizScreener
-                stocks={stocks}
-                onSelectStock={handleSelectStock}
               />
             )}
 

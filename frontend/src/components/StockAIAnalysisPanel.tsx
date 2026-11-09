@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { StockRecord } from '../types/stock';
+import { formatCurrencyUSD, calculateRealSMA } from '../utils/formatters';
 
 interface StockAIAnalysisPanelProps {
   stock: StockRecord;
@@ -83,12 +84,18 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
       convictionReason = 'Entrada táctica de menor tamaño protegiendo capital en soporte estructural.';
     }
 
-    // Normalizar Market Cap en Billones
+    // Normalizar Market Cap en dólares absolutos y formato oficial
     const rawMcap = stock.market_cap || 10000000000;
-    const mcapBillions = rawMcap > 1e6 ? rawMcap / 1e9 : rawMcap / 1000;
+    const mcapInDollars = rawMcap > 1e6 ? rawMcap : rawMcap * 1e6;
+    const mcapFormatted = formatCurrencyUSD(mcapInDollars);
+    const mcapBillions = Number((mcapInDollars / 1e9).toFixed(2));
 
-    // FCF estimado en ~85% del ingreso neto o proporción de market cap
-    const fcfEstimate = stock.income ? Number((stock.income * 0.85).toFixed(1)) : Number((mcapBillions * 0.08 * 1000).toFixed(1));
+    // FCF estimado en dólares absolutos con formato institucional
+    const rawIncome = stock.income || 0;
+    const fcfInDollars = rawIncome > 0
+      ? (rawIncome > 1e6 ? rawIncome * 0.85 : rawIncome * 1e6 * 0.85)
+      : mcapInDollars * 0.08;
+    const fcfFormatted = formatCurrencyUSD(fcfInDollars);
 
     // Distancia a ATH / 52W High
     const distAth = stock.dist_52w_high ? Number(stock.dist_52w_high.toFixed(2)) : -14.2;
@@ -96,6 +103,16 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
     // Valor Intrínseco estimado (GF Value / DCF)
     const intrinsicValue = Number((price * 1.32).toFixed(2));
     const marginOfSafety = Number((((intrinsicValue - price) / intrinsicValue) * 100).toFixed(1));
+
+    // Cálculo de precios reales de SMA 50 y SMA 200 a partir de porcentajes Finviz
+    const realSma50 = calculateRealSMA(price, stock.sma50);
+    const realSma200 = calculateRealSMA(price, stock.sma200);
+
+    const sma50Price = realSma50 ? realSma50.price : Number((price * 0.98).toFixed(2));
+    const sma50DistStr = realSma50 ? (realSma50.distancePct >= 0 ? `+${realSma50.distancePct}%` : `${realSma50.distancePct}%`) : '+2.0%';
+
+    const sma200Price = realSma200 ? realSma200.price : Number((price * 0.94).toFixed(2));
+    const sma200DistStr = realSma200 ? (realSma200.distancePct >= 0 ? `+${realSma200.distancePct}%` : `${realSma200.distancePct}%`) : '+6.0%';
 
     return {
       price,
@@ -114,13 +131,18 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
       sh45,
       convictionTier,
       convictionReason,
-      mcapBillions: Number(mcapBillions.toFixed(2)),
-      fcfEstimate,
+      mcapInDollars,
+      mcapFormatted,
+      mcapBillions,
+      fcfInDollars,
+      fcfFormatted,
       distAth,
       intrinsicValue,
       marginOfSafety,
-      sma50: stock.sma50 ? Number(stock.sma50.toFixed(2)) : Number((price * 0.98).toFixed(2)),
-      sma200: stock.sma200 ? Number(stock.sma200.toFixed(2)) : Number((price * 0.94).toFixed(2))
+      sma50Price,
+      sma50DistStr,
+      sma200Price,
+      sma200DistStr
     };
   }, [stock]);
 
@@ -314,7 +336,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
       </div>
       <div class="stat-card">
         <div class="stat-card-label">Market Cap</div>
-        <div class="stat-card-value">$${analysisData.mcapBillions}B</div>
+        <div class="stat-card-value">${analysisData.mcapFormatted}</div>
       </div>
       <div class="stat-card">
         <div class="stat-card-label">Ventas YoY</div>
@@ -336,7 +358,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
     <div class="section-title">¿A qué se dedica?</div>
     <div class="card-white">
       <p class="lead-text">
-        <span class="kw">${company}</span> opera como un líder estratégico en el sector <span class="kw">${sector}</span>, enfocado en <span class="kw">${industry}</span>. La compañía combina una fuerte posición competitiva con una capacidad de generación sostenida de <span class="kw">Flujo de Caja Libre anual (estimado en ~$${analysisData.fcfEstimate}M USD)</span> y un margen neto del <span class="kw">${stock.profit_m ?? 16.5}%</span>. Cotiza actualmente a <span class="kw">$${analysisData.price.toFixed(2)} USD</span>, ofreciendo un <span class="kw">Margen de Seguridad de +${analysisData.marginOfSafety}% frente a su Valor Intrínseco estimado de $${analysisData.intrinsicValue} USD</span>, con una estructura de riesgo asimétrico calibrada para un horizonte swing a 3 meses.
+        <span class="kw">${company}</span> opera como un líder estratégico en el sector <span class="kw">${sector}</span>, enfocado en <span class="kw">${industry}</span>. La compañía combina una fuerte posición competitiva con una capacidad de generación sostenida de <span class="kw">Flujo de Caja Libre anual (estimado en ~${analysisData.fcfFormatted})</span> y un margen neto del <span class="kw">${stock.profit_m ?? 16.5}%</span>. Cotiza actualmente a <span class="kw">$${analysisData.price.toFixed(2)} USD</span>, ofreciendo un <span class="kw">Margen de Seguridad de +${analysisData.marginOfSafety}% frente a su Valor Intrínseco estimado de $${analysisData.intrinsicValue} USD</span>, con una estructura de riesgo asimétrico calibrada para un horizonte swing a 3 meses.
       </p>
     </div>
   </section>
@@ -376,7 +398,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
         <ul class="rival-bullets">
           <li><strong>Fuerza Relativa Positiva:</strong> ${ticker} mantiene una aceleración que supera el desempeño de ${sectorEtf.ticker} y del SPY en la sesión actual.</li>
           <li><strong>Huella Institucional:</strong> Volumen Relativo (RVol) de ${analysisData.rvol}x con un Closing Range del ${analysisData.closingRange}%, señalando acumulación por parte de fondos.</li>
-          <li><strong>Estructura Técnica:</strong> Cotiza firmemente por encima de sus medias clave (SMA 50: $${analysisData.sma50} y SMA 200: $${analysisData.sma200}).</li>
+          <li><strong>Estructura Técnica:</strong> Cotiza firmemente por encima de sus medias clave (SMA 50: $${analysisData.sma50Price} [${analysisData.sma50DistStr}] y SMA 200: $${analysisData.sma200Price} [${analysisData.sma200DistStr}]).</li>
         </ul>
       </div>
     </div>
@@ -413,7 +435,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
     <div class="mktcap-banner">
       <div>
         <div class="metric-mini-label">Market Capitalization</div>
-        <div class="mktcap-val">$${analysisData.mcapBillions}B USD</div>
+        <div class="mktcap-val">${analysisData.mcapFormatted}</div>
       </div>
       <div class="mktcap-metrics">
         <div>
@@ -430,7 +452,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
         </div>
         <div>
           <div class="metric-mini-label">Free Cash Flow</div>
-          <div class="metric-mini-val">~$${analysisData.fcfEstimate}M</div>
+          <div class="metric-mini-val">~${analysisData.fcfFormatted}</div>
         </div>
       </div>
     </div>
@@ -477,8 +499,8 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
         <div class="giant-pct">${analysisData.distAth.toFixed(1)}%</div>
         <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px; font-size: 13px; color: #cbd5e1; display: flex; flex-direction: column; gap: 6px;">
           <div><strong>Cotización Actual:</strong> $${analysisData.price.toFixed(2)} USD</div>
-          <div><strong>SMA 50 diaria:</strong> $${analysisData.sma50} USD (Soporte dinámico)</div>
-          <div><strong>SMA 200 diaria:</strong> $${analysisData.sma200} USD (Tendencia alcista estructural)</div>
+          <div><strong>SMA 50 diaria:</strong> $${analysisData.sma50Price} USD (${analysisData.sma50DistStr})</div>
+          <div><strong>SMA 200 diaria:</strong> $${analysisData.sma200Price} USD (${analysisData.sma200DistStr})</div>
           <div><strong>Volumen Relativo:</strong> ${analysisData.rvol}x | <strong>Closing Range:</strong> ${analysisData.closingRange}%</div>
         </div>
       </div>
@@ -630,9 +652,9 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
       stock.forward_pe ? stock.forward_pe.toFixed(2) : '—',
       stock.profit_m ? `${stock.profit_m}%` : '—',
       stock.ev_ebitda ? stock.ev_ebitda.toFixed(2) : '—',
-      `$${analysisData.fcfEstimate}M`,
-      `${(((analysisData.price - analysisData.sma50) / analysisData.sma50) * 100).toFixed(1)}%`,
-      `${(((analysisData.price - analysisData.sma200) / analysisData.sma200) * 100).toFixed(1)}%`,
+      analysisData.fcfFormatted,
+      analysisData.sma50DistStr,
+      analysisData.sma200DistStr,
       '2.1x', // Backlog/Ventas
       stock.peg ? stock.peg.toFixed(2) : '—',
       stock.debt_eq ? stock.debt_eq.toFixed(2) : '—',
@@ -876,7 +898,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--text-muted)' }}>Flujo Caja Libre (FCF):</span>
-                      <span className="font-mono" style={{ fontWeight: 700, color: 'var(--accent-green)' }}>~${analysisData.fcfEstimate}M USD</span>
+                      <span className="font-mono" style={{ fontWeight: 700, color: 'var(--accent-green)' }}>~{analysisData.fcfFormatted}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--text-muted)' }}>Current Ratio:</span>
@@ -948,11 +970,11 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--text-muted)' }}>Soporte SMA 50:</span>
-                      <span className="font-mono" style={{ fontWeight: 700, color: '#fff' }}>${analysisData.sma50}</span>
+                      <span className="font-mono" style={{ fontWeight: 700, color: '#fff' }}>${analysisData.sma50Price} <span style={{ fontSize: '0.75rem', color: analysisData.sma50DistStr.startsWith('+') ? 'var(--accent-green)' : '#ef4444' }}>({analysisData.sma50DistStr})</span></span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--text-muted)' }}>Tendencia SMA 200:</span>
-                      <span className="font-mono" style={{ fontWeight: 700, color: '#fff' }}>${analysisData.sma200}</span>
+                      <span className="font-mono" style={{ fontWeight: 700, color: '#fff' }}>${analysisData.sma200Price} <span style={{ fontSize: '0.75rem', color: analysisData.sma200DistStr.startsWith('+') ? 'var(--accent-green)' : '#ef4444' }}>({analysisData.sma200DistStr})</span></span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--text-muted)' }}>Patrón Acumulación:</span>

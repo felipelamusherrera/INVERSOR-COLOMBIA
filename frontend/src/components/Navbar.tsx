@@ -249,23 +249,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button 
             id="nav-btn-screener"
-            className={`btn ${currentTab === 'screener' ? 'btn-active' : 'btn-secondary'}`}
+            className={`btn ${currentTab === 'screener' || currentTab === 'finviz-screener' ? 'btn-active' : 'btn-secondary'}`}
             style={{ padding: '6px 10px', fontSize: '0.78rem' }}
             onClick={() => setCurrentTab('screener')}
           >
-            <Layers size={14} />
-            Screener Quant
-          </button>
-
-          {/* Nuevo Módulo: Screener Finviz */}
-          <button 
-            id="nav-btn-finviz-screener"
-            className={`btn ${currentTab === 'finviz-screener' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '6px 10px', fontSize: '0.78rem' }}
-            onClick={() => setCurrentTab('finviz-screener')}
-          >
-            <Filter size={14} color="var(--accent-green)" />
-            Screener Finviz
+            <Layers size={14} color="var(--accent-green)" />
+            Screener acciones
           </button>
 
           {/* Nuevo Módulo: Maps (Heatmap Finviz) */}
