@@ -44,6 +44,8 @@ import type { StockRecord } from '../types/stock';
 import { formatCurrencyUSD, formatPercentage, calculateRealSMA } from '../utils/formatters';
 import { 
   runGeminiStockAnalysis, 
+  testGeminiApiKey,
+  sanitizeApiKey,
   getStoredGeminiApiKey, 
   saveStoredGeminiApiKey,
   type GeminiAnalysisResult 
@@ -67,6 +69,8 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [inputApiKey, setInputApiKey] = useState('');
   const [hasApiKey, setHasApiKey] = useState(false);
+  const [isTestingKey, setIsTestingKey] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string; model?: string } | null>(null);
 
   // Comprobar si existe API key guardada
   useEffect(() => {
@@ -377,29 +381,42 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
     toast.info(`Iniciando investigación institucional con Google Gemini Flash para ${stock.ticker}...`);
     try {
       const res = await runGeminiStockAnalysis(stock, peers, key);
-      if (res) {
-        setGeminiResult(res);
-        toast.success(`Análisis con Gemini Flash completado exitosamente para ${stock.ticker}`);
+      if (res.success && res.data) {
+        setGeminiResult(res.data);
+        toast.success(`Análisis con ${res.activeModel || 'Gemini Flash'} completado exitosamente para ${stock.ticker}`);
       } else {
-        toast.error('No se pudo generar el análisis con Gemini. Verifique la API Key o intente nuevamente.');
+        toast.error(res.error || 'No se pudo generar el análisis con Gemini. Verifique la API Key o intente nuevamente.');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      toast.error('Ocurrió un error llamando al servicio de Gemini.');
+      toast.error(e?.message || 'Ocurrió un error llamando al servicio de Gemini.');
     } finally {
       setIsGeminiLoading(false);
     }
   };
 
-  const handleSaveApiKey = () => {
-    if (!inputApiKey.trim()) {
+  const handleSaveApiKey = async () => {
+    const clean = sanitizeApiKey(inputApiKey);
+    if (!clean) {
       toast.error('Por favor ingrese una API Key válida.');
       return;
     }
-    saveStoredGeminiApiKey(inputApiKey.trim());
+
+    setIsTestingKey(true);
+    setTestResult(null);
+    const test = await testGeminiApiKey(clean);
+    setIsTestingKey(false);
+    setTestResult(test);
+
+    if (!test.success) {
+      toast.error(test.message);
+      return;
+    }
+
+    saveStoredGeminiApiKey(clean);
     setHasApiKey(true);
     setShowApiKeyModal(false);
-    toast.success('API Key de Gemini guardada correctamente.');
+    toast.success('API Key de Gemini validada y guardada correctamente.');
     handleRunGeminiAnalysis();
   };
 
@@ -1646,14 +1663,46 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
               </ol>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-                Gemini API Key (Google AI Studio):
-              </label>
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <label style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+                  Gemini API Key (Google AI Studio):
+                </label>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const clean = sanitizeApiKey(inputApiKey);
+                    if (!clean) {
+                      toast.error('Ingresa una API Key primero.');
+                      return;
+                    }
+                    setIsTestingKey(true);
+                    setTestResult(null);
+                    const test = await testGeminiApiKey(clean);
+                    setIsTestingKey(false);
+                    setTestResult(test);
+                    if (test.success) {
+                      toast.success(test.message);
+                    } else {
+                      toast.error(test.message);
+                    }
+                  }}
+                  disabled={isTestingKey || !inputApiKey.trim()}
+                  className="btn btn-secondary"
+                  style={{ padding: '3px 8px', fontSize: '0.70rem', gap: '4px' }}
+                >
+                  {isTestingKey ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                  Probar Clave
+                </button>
+              </div>
+
               <input
                 type="password"
                 value={inputApiKey}
-                onChange={(e) => setInputApiKey(e.target.value)}
+                onChange={(e) => {
+                  setInputApiKey(e.target.value);
+                  setTestResult(null);
+                }}
                 placeholder="AIzaSy..."
                 className="input-field"
                 style={{
@@ -1667,11 +1716,31 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
                   color: '#fff'
                 }}
               />
+
+              {testResult && (
+                <div style={{
+                  marginTop: '10px',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  fontSize: '0.78rem',
+                  lineHeight: 1.5,
+                  background: testResult.success ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                  border: `1px solid ${testResult.success ? 'rgba(16, 185, 129, 0.35)' : 'rgba(239, 68, 68, 0.35)'}`,
+                  color: testResult.success ? 'var(--accent-green)' : '#fca5a5'
+                }}>
+                  <strong>{testResult.success ? '✓ Éxito: ' : '✕ Error: '}</strong>
+                  {testResult.message}
+                  {testResult.model && ` (Modelo verificado: ${testResult.model})`}
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button
-                onClick={() => setShowApiKeyModal(false)}
+                onClick={() => {
+                  setShowApiKeyModal(false);
+                  setTestResult(null);
+                }}
                 className="btn btn-secondary"
                 style={{ padding: '8px 16px', fontSize: '0.82rem' }}
               >
@@ -1679,15 +1748,18 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
               </button>
               <button
                 onClick={handleSaveApiKey}
+                disabled={isTestingKey}
                 className="btn btn-primary"
                 style={{
                   padding: '8px 18px',
                   fontSize: '0.82rem',
                   fontWeight: 800,
-                  background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)'
+                  background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)',
+                  gap: '6px'
                 }}
               >
-                <Check size={14} /> Guardar y Ejecutar Análisis
+                {isTestingKey ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                Guardar y Ejecutar Análisis
               </button>
             </div>
           </div>

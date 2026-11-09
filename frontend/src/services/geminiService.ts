@@ -3,25 +3,42 @@
  * Proyecto: Inversor Colombia
  * 
  * Permite ejecutar análisis cualitativos y cuantitativos institucionales en tiempo real
- * utilizando los modelos Gemini de Google (Gemini 2.0 Flash / Gemini 1.5 Flash).
+ * utilizando los modelos Gemini de Google (Gemini 1.5 Flash / Gemini 2.0 Flash)
+ * con cascada automática de respaldo y diagnóstico detallado de errores.
  */
 
 import type { StockRecord } from '../types/stock';
 
 const GEMINI_STORAGE_KEY = 'inversor_colombia_gemini_api_key';
-const DEFAULT_MODEL = 'gemini-2.0-flash';
+
+// Lista de modelos ordenados por compatibilidad universal y rendimiento
+const CANDIDATE_MODELS = [
+  'gemini-1.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-pro'
+];
+
+/**
+ * Limpia y normaliza una API Key eliminando comillas, espacios y saltos de línea accidentales
+ */
+export function sanitizeApiKey(rawKey: string): string {
+  if (!rawKey) return '';
+  return rawKey.replace(/["'\s`]/g, '').trim();
+}
 
 export function getStoredGeminiApiKey(): string {
   try {
-    return localStorage.getItem(GEMINI_STORAGE_KEY) || import.meta.env.VITE_GEMINI_API_KEY || '';
+    const raw = localStorage.getItem(GEMINI_STORAGE_KEY) || import.meta.env.VITE_GEMINI_API_KEY || '';
+    return sanitizeApiKey(raw);
   } catch {
-    return import.meta.env.VITE_GEMINI_API_KEY || '';
+    return sanitizeApiKey(import.meta.env.VITE_GEMINI_API_KEY || '');
   }
 }
 
 export function saveStoredGeminiApiKey(key: string): void {
   try {
-    localStorage.setItem(GEMINI_STORAGE_KEY, key.trim());
+    const clean = sanitizeApiKey(key);
+    localStorage.setItem(GEMINI_STORAGE_KEY, clean);
   } catch (e) {
     console.error('Error guardando Gemini API Key:', e);
   }
@@ -60,13 +77,92 @@ export interface GeminiAnalysisResult {
   };
 }
 
+export interface GeminiServiceResponse {
+  success: boolean;
+  data?: GeminiAnalysisResult;
+  error?: string;
+  activeModel?: string;
+}
+
+/**
+ * Valida rápidamente una API Key ejecutando un ping ligero contra la API de Google
+ */
+export async function testGeminiApiKey(apiKey: string): Promise<{ success: boolean; message: string; model?: string }> {
+  const cleanKey = sanitizeApiKey(apiKey);
+  if (!cleanKey) {
+    return { success: false, message: 'La API Key está vacía.' };
+  }
+
+  for (const model of CANDIDATE_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'ping' }] }],
+          generationConfig: { maxOutputTokens: 5 }
+        })
+      });
+
+      if (res.ok) {
+        return { 
+          success: true, 
+          message: `Conexión exitosa verificada con Google AI Studio.`,
+          model 
+        };
+      }
+
+      const errJson = await res.json().catch(() => null);
+      const errMsg = errJson?.error?.message || `HTTP ${res.status}`;
+
+      if (res.status === 400 && (errMsg.includes('API key not valid') || errMsg.includes('API_KEY_INVALID'))) {
+        return { 
+          success: false, 
+          message: 'La API Key no es válida. Asegúrate de copiar la clave completa de Google AI Studio (comienza con "AIzaSy...").' 
+        };
+      }
+
+      if (res.status === 403) {
+        return { 
+          success: false, 
+          message: 'Permiso denegado: Asegúrate de que la API "Generative Language API" esté habilitada en tu proyecto de Google Cloud.' 
+        };
+      }
+
+      if (res.status === 429) {
+        return { 
+          success: false, 
+          message: 'Límite de cuota alcanzado (429). Espera un minuto antes de reintentar.' 
+        };
+      }
+    } catch (e: any) {
+      // Intentar con el siguiente modelo si fue error 404
+      continue;
+    }
+  }
+
+  return {
+    success: false,
+    message: 'No se pudo comunicar con Google Generative Language API. Verifica tu conexión a internet o el estado de tu clave.'
+  };
+}
+
+/**
+ * Ejecuta el análisis profundo institucional de una acción con Gemini Flash
+ */
 export async function runGeminiStockAnalysis(
   stock: StockRecord, 
   peers: StockRecord[],
   apiKey?: string
-): Promise<GeminiAnalysisResult | null> {
-  const key = apiKey || getStoredGeminiApiKey();
-  if (!key) return null;
+): Promise<GeminiServiceResponse> {
+  const key = sanitizeApiKey(apiKey || getStoredGeminiApiKey());
+  if (!key) {
+    return { 
+      success: false, 
+      error: 'No se ha configurado ninguna API Key de Gemini. Ingresa tu clave para continuar.' 
+    };
+  }
 
   const prompt = `Actúa como un Analista de Inversión Institucional Senior (Enfoque Riesgo Medio-Alto, Swing a 3 meses, Estándar PLTR/TMUS).
 Analiza la siguiente acción:
@@ -84,7 +180,7 @@ Analiza la siguiente acción:
 - Titular Noticia: "${stock.news_title || 'N/A'}"
 - Peers del sector: ${peers.map(p => `${p.ticker} (P/E: ${p.pe}x)`).join(', ')}
 
-Devuelve EXCLUSIVAMENTE un objeto JSON válido (sin markdown backticks ni código envolvente) con la siguiente estructura exacta:
+Devuelve EXCLUSIVAMENTE un objeto JSON válido (sin código markdown ni explicaciones externas) con la siguiente estructura exacta:
 {
   "businessDescription": "Párrafo conciso y contundente explicando a qué se dedica, su foso económico y cómo monetiza.",
   "competitivePosition": {
@@ -118,7 +214,7 @@ Devuelve EXCLUSIVAMENTE un objeto JSON válido (sin markdown backticks ni códig
   },
   "capitalStructure": {
     "buybackVsDilutionDiagnosis": "Diagnóstico detallado de si recompra acciones (acrecentando EPS) o diluye accionistas por SBC o emisiones.",
-    "verdict": "Favorable: Política Activa de Recompra de Acciones" o "Precaución: Dilución por Compensación en Acciones (SBC)"
+    "verdict": "Favorable: Política Activa de Recompra de Acciones"
   },
   "valueChain": {
     "suppliers": [
@@ -132,37 +228,79 @@ Devuelve EXCLUSIVAMENTE un objeto JSON válido (sin markdown backticks ni códig
   }
 }`;
 
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULT_MODEL}:generateContent?key=${key}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 2048,
-          responseMimeType: 'application/json'
+  let lastError = 'No se pudo generar el análisis.';
+
+  // Cascada automática de modelos
+  for (const model of CANDIDATE_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 8192,
+            responseMimeType: 'application/json'
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => null);
+        const errMsg = errJson?.error?.message || `HTTP ${response.status}`;
+
+        if (response.status === 400 && (errMsg.includes('API key not valid') || errMsg.includes('API_KEY_INVALID'))) {
+          return {
+            success: false,
+            error: 'La API Key ingresada no es válida. Copia una clave nueva desde Google AI Studio (aistudio.google.com/app/apikey).'
+          };
         }
-      })
-    });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('Error en Gemini API:', response.status, errText);
-      return null;
+        if (response.status === 403) {
+          return {
+            success: false,
+            error: 'Permiso denegado (403): La clave no tiene permisos para Generative Language API.'
+          };
+        }
+
+        if (response.status === 429) {
+          return {
+            success: false,
+            error: 'Cuota de peticiones excedida temporalmente (429). Espera 30 segundos.'
+          };
+        }
+
+        lastError = `Error en modelo ${model}: ${errMsg}`;
+        // Probar siguiente modelo
+        continue;
+      }
+
+      const data = await response.json();
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) {
+        lastError = 'El modelo devolvió una respuesta vacía.';
+        continue;
+      }
+
+      // Limpiar posibles backticks o envoltura markdown
+      const cleaned = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
+      const parsed = JSON.parse(cleaned) as GeminiAnalysisResult;
+
+      return {
+        success: true,
+        data: parsed,
+        activeModel: model
+      };
+    } catch (err: any) {
+      lastError = err?.message || 'Error de procesamiento de respuesta JSON.';
+      console.warn(`Intento con ${model} falló:`, err);
     }
-
-    const data = await response.json();
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) return null;
-
-    // Limpiar posibles backticks
-    const cleaned = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-    return JSON.parse(cleaned) as GeminiAnalysisResult;
-  } catch (error) {
-    console.error('Excepción llamando a Gemini:', error);
-    return null;
   }
-}
 
+  return {
+    success: false,
+    error: lastError
+  };
+}
