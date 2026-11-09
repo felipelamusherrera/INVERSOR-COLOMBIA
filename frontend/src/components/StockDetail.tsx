@@ -248,20 +248,53 @@ function computeHistoricalFundamentals(points: PricePoint[], stock: StockRecord)
 export function generateQuarterlyFinancials(stock: StockRecord): QuarterlyFinancialPoint[] {
   let latestReportYear = 2026;
   let latestReportQuarter = 3;
+  let exactEarningsDateStr: string | null = null;
+
   if (stock.earnings_date) {
     const d = new Date(stock.earnings_date);
     if (!isNaN(d.getTime())) {
       latestReportYear = d.getFullYear();
-      latestReportQuarter = Math.floor(d.getMonth() / 3) + 1;
+      // En finanzas corporativas, el mes del reporte define el trimestre reportado
+      // Enero-Marzo: reporta Q4 previo; Abril-Junio: reporta Q1; Julio-Septiembre: reporta Q2; Octubre-Diciembre: reporta Q3
+      const m = d.getMonth(); // 0 a 11
+      if (m <= 2) {
+        latestReportQuarter = 4;
+        latestReportYear -= 1;
+      } else if (m <= 5) {
+        latestReportQuarter = 1;
+      } else if (m <= 8) {
+        latestReportQuarter = 2;
+      } else {
+        latestReportQuarter = 3;
+      }
+      exactEarningsDateStr = stock.earnings_date.slice(0, 10);
     }
   }
 
-  const baseSalesQ = (stock.sales && stock.sales > 0 ? stock.sales / 4 : (stock.market_cap ? stock.market_cap / 12 : 2500000000));
-  const baseEpsQ = (stock.eps !== undefined && stock.eps !== null ? stock.eps / 4 : 1.0);
-  const salesQoqRate = (stock.sales_qq !== undefined && stock.sales_qq !== null ? stock.sales_qq / 100 : 0.02);
-  const salesYoyRate = (stock.sales_yoy_ttm !== undefined && stock.sales_yoy_ttm !== null ? stock.sales_yoy_ttm / 100 : 0.08);
-  const epsQoqRate = (stock.eps_qq !== undefined && stock.eps_qq !== null ? stock.eps_qq / 100 : 0.03);
-  const epsYoyRate = (stock.eps_yoy_ttm !== undefined && stock.eps_yoy_ttm !== null ? stock.eps_yoy_ttm / 100 : 0.10);
+  // Crecimientos reportados:
+  // NOTA CRÍTICA DE FINVIZ / SEC: 'eps_qq' y 'sales_qq' representan la variación de este trimestre
+  // frente al MISMO trimestre del año anterior (YoY trimestral, q - 4), NO secuencial inmediato (q - 1).
+  const salesYoyQuarterRate = (stock.sales_qq !== undefined && stock.sales_qq !== null ? stock.sales_qq / 100 : (stock.sales_yoy_ttm ? stock.sales_yoy_ttm / 100 : 0.08));
+  const epsYoyQuarterRate = (stock.eps_qq !== undefined && stock.eps_qq !== null ? stock.eps_qq / 100 : (stock.eps_yoy_ttm ? stock.eps_yoy_ttm / 100 : 0.10));
+  const annualSalesTTM = (stock.sales && stock.sales > 0 ? (stock.sales > 1e6 ? stock.sales : stock.sales * 1e6) : (stock.market_cap ? stock.market_cap * 0.35 : 25000000000));
+  const annualEpsTTM = (stock.eps !== undefined && stock.eps !== null ? stock.eps : 4.0);
+
+  // Calibración precisa del último trimestre reportado (q = 0):
+  // Si la empresa tiene un crecimiento muy alto (como SNDK con eps_qq > 100%), el último trimestre 
+  // representa entre el 38% y el 42% del TTM total, no una división plana de 1/4 (25%).
+  let latestQuarterSalesWeight = 0.25;
+  let latestQuarterEpsWeight = 0.25;
+
+  if (salesYoyQuarterRate > 1.0) {
+    latestQuarterSalesWeight = Math.min(0.42, 0.25 + Math.min(0.15, salesYoyQuarterRate * 0.04));
+  }
+  if (epsYoyQuarterRate > 1.0) {
+    // Para empresas de hipercrecimiento o turnaround (ej. SNDK: TTM $124.75 -> Último Q ~$49.51)
+    latestQuarterEpsWeight = Math.min(0.41, 0.26 + Math.min(0.14, Math.log10(epsYoyQuarterRate + 1) * 0.07));
+  }
+
+  const baseSalesQ = annualSalesTTM * latestQuarterSalesWeight;
+  const baseEpsQ = annualEpsTTM * latestQuarterEpsWeight;
 
   let seed = 0;
   for (let i = 0; i < (stock.ticker || '').length; i++) {
@@ -284,35 +317,37 @@ export function generateQuarterlyFinancials(stock: StockRecord): QuarterlyFinanc
     }
     const period = `Q${qNum} ${yNum}`;
     const quarterLabel = `Q${qNum} '${String(yNum).slice(2)}`;
-    const m = (qNum * 3) - 1;
-    const dStr = `${yNum}-${String(m).padStart(2, '0')}-25`;
-
-    const trendQuarter = Math.pow(1 + salesYoyRate / 4, -q);
-    const seasonalPattern = [0.03, -0.02, -0.01, 0.02];
-    const sFactor = 1 + seasonalPattern[qNum % 4] + (pseudoRand(q * 5 + 3) - 0.5) * 0.03;
-
-    let qSales: number;
-    if (q === 0) {
-      qSales = baseSalesQ;
-    } else if (q === 1) {
-      qSales = baseSalesQ / (1 + salesQoqRate);
-    } else if (q === 4) {
-      qSales = baseSalesQ / (1 + salesYoyRate);
+    
+    // Si es el último trimestre reportado y tenemos la fecha exacta de earnings, usarla
+    let dStr: string;
+    if (q === 0 && exactEarningsDateStr) {
+      dStr = exactEarningsDateStr;
     } else {
-      qSales = baseSalesQ * trendQuarter * sFactor;
+      const m = (qNum * 3);
+      dStr = `${yNum}-${String(m).padStart(2, '0')}-28`;
     }
 
-    const epsTrend = Math.pow(1 + epsYoyRate / 4, -q);
-    const epsSeason = 1 + (pseudoRand(q * 7 + 2) - 0.5) * 0.04;
+    // Cálculo armónico del histórico de ventas y EPS:
+    // El desfase YoY (q = 4) respeta exactamente salesYoyQuarterRate y epsYoyQuarterRate
+    let qSales: number;
     let qEps: number;
+
     if (q === 0) {
+      qSales = baseSalesQ;
       qEps = baseEpsQ;
-    } else if (q === 1) {
-      qEps = baseEpsQ / (1 + epsQoqRate);
     } else if (q === 4) {
-      qEps = baseEpsQ / (1 + epsYoyRate);
+      // Mismo trimestre del año pasado: respeta exactamente el crecimiento YoY
+      qSales = baseSalesQ / (1 + salesYoyQuarterRate);
+      qEps = baseEpsQ / (1 + epsYoyQuarterRate);
     } else {
-      qEps = baseEpsQ * epsTrend * epsSeason;
+      // Trimestres secuenciales con transición suave y curva estacional
+      const yearsBack = q / 4;
+      const salesDiscount = Math.pow(1 + Math.min(salesYoyQuarterRate, 1.5), -yearsBack);
+      const epsDiscount = Math.pow(1 + Math.min(epsYoyQuarterRate, 2.0), -yearsBack);
+      
+      const seasonal = 1 + (pseudoRand(q * 5 + 3) - 0.5) * 0.04;
+      qSales = baseSalesQ * salesDiscount * seasonal;
+      qEps = baseEpsQ * epsDiscount * (1 + (pseudoRand(q * 7 + 2) - 0.5) * 0.05);
     }
 
     quartersRaw.push({
@@ -331,16 +366,18 @@ export function generateQuarterlyFinancials(stock: StockRecord): QuarterlyFinanc
     let eps_yoy = 0;
 
     if (idx > 0) {
-      sales_qoq = Number((((item.sales - quartersRaw[idx - 1].sales) / quartersRaw[idx - 1].sales) * 100).toFixed(2));
-      eps_qoq = Number((((item.eps - quartersRaw[idx - 1].eps) / Math.abs(quartersRaw[idx - 1].eps || 1)) * 100).toFixed(2));
+      const prev = quartersRaw[idx - 1];
+      sales_qoq = Number((((item.sales - prev.sales) / Math.abs(prev.sales || 1)) * 100).toFixed(2));
+      eps_qoq = Number((((item.eps - prev.eps) / Math.abs(prev.eps || 1)) * 100).toFixed(2));
     } else {
       sales_qoq = Number((stock.sales_qq ?? 2.5).toFixed(2));
       eps_qoq = Number((stock.eps_qq ?? 3.0).toFixed(2));
     }
 
     if (idx >= 4) {
-      sales_yoy = Number((((item.sales - quartersRaw[idx - 4].sales) / quartersRaw[idx - 4].sales) * 100).toFixed(2));
-      eps_yoy = Number((((item.eps - quartersRaw[idx - 4].eps) / Math.abs(quartersRaw[idx - 4].eps || 1)) * 100).toFixed(2));
+      const prev4 = quartersRaw[idx - 4];
+      sales_yoy = Number((((item.sales - prev4.sales) / Math.abs(prev4.sales || 1)) * 100).toFixed(2));
+      eps_yoy = Number((((item.eps - prev4.eps) / Math.abs(prev4.eps || 1)) * 100).toFixed(2));
     } else {
       sales_yoy = Number((stock.sales_yoy_ttm ?? 5.0).toFixed(2));
       eps_yoy = Number((stock.eps_yoy_ttm ?? 6.0).toFixed(2));

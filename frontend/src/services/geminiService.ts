@@ -165,3 +165,4 @@ Devuelve EXCLUSIVAMENTE un objeto JSON válido (sin markdown backticks ni códig
     return null;
   }
 }
+
