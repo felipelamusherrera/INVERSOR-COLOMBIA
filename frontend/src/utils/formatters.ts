@@ -82,3 +82,38 @@ export function calculateRealSMA(price: number, pctDistance: number | undefined 
     distancePct: Number(pctDistance.toFixed(2))
   };
 }
+
+/**
+ * Determina o proyecta la fecha del PRÓXIMO reporte de resultados (Earnings Date).
+ * Si la fecha registrada en la base de datos ya pasó respecto a la fecha actual,
+ * proyecta el próximo ciclo trimestral (+3 meses) hasta garantizar una fecha estrictamente futura (> hoy).
+ */
+export function calculateNextEarningsDate(earningsDateStr?: string | null): string {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  if (earningsDateStr) {
+    const rawDate = new Date(earningsDateStr);
+    if (!isNaN(rawDate.getTime())) {
+      let nextDate = new Date(rawDate);
+      // Si la fecha registrada es anterior o igual a hoy, avanzar de a 3 meses (un trimestre) hasta que sea estrictamente futura
+      while (nextDate <= now) {
+        nextDate.setMonth(nextDate.getMonth() + 3);
+      }
+      return nextDate.toISOString().slice(0, 10);
+    }
+  }
+
+  // Fallback para empresas sin fecha: proyectar ciclo trimestral corporativo estándar
+  const currentMonth = now.getMonth(); // 0-11
+  const currentYear = now.getFullYear();
+  const quarterTargetMonths = [0, 3, 6, 9]; // Ene, Abr, Jul, Oct
+  let targetMonth = quarterTargetMonths.find(m => m > currentMonth);
+  let targetYear = currentYear;
+  if (targetMonth === undefined) {
+    targetMonth = 0;
+    targetYear += 1;
+  }
+  const fallback = new Date(targetYear, targetMonth, 26);
+  return fallback.toISOString().slice(0, 10);
+}

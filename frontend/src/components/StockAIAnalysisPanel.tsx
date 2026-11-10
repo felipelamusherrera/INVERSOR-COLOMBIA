@@ -34,7 +34,7 @@ import {
 } from 'recharts';
 import { toast } from 'sonner';
 import type { StockRecord } from '../types/stock';
-import { formatCurrencyUSD, formatPercentage, calculateRealSMA } from '../utils/formatters';
+import { formatCurrencyUSD, formatPercentage, calculateRealSMA, calculateNextEarningsDate } from '../utils/formatters';
 
 interface StockAIAnalysisPanelProps {
   stock: StockRecord;
@@ -1186,8 +1186,8 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
                   <tbody>
                     <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                       <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>Próximo Reporte</td>
-                      <td style={{ padding: '8px 12px', textAlign: 'right', color: '#fff' }}>
-                        {stock.earnings_date ? `Programado para ${stock.earnings_date.slice(0, 10)}` : 'Monitoreo en calendario corporativo'}
+                      <td style={{ padding: '8px 12px', textAlign: 'right', color: '#fff', fontWeight: 600 }}>
+                        Programado para {calculateNextEarningsDate(stock.earnings_date)}
                       </td>
                     </tr>
                     <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>

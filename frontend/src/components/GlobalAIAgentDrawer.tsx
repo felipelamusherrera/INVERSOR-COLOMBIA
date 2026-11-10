@@ -14,6 +14,8 @@ import {
   Copy,
   Check,
   Loader2,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { StockRecord } from '../types/stock';
@@ -58,6 +60,53 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Ancho dinámico del drawer con persistencia en localStorage
+  const [drawerWidth, setDrawerWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('inversor_agent_drawer_width');
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= 440 && parsed <= 1600) return parsed;
+      }
+    } catch {}
+    return 680; // Ancho predeterminado confortable para tablas cuantitativas
+  });
+
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartXRef = useRef<number>(0);
+  const resizeStartWidthRef = useRef<number>(0);
+
+  const handleMouseDownResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    resizeStartXRef.current = e.clientX;
+    resizeStartWidthRef.current = drawerWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = resizeStartXRef.current - moveEvent.clientX; // Desplazar hacia la izquierda agranda el panel
+      const newWidth = Math.min(
+        Math.max(460, resizeStartWidthRef.current + deltaX),
+        Math.min(1450, window.innerWidth - 20)
+      );
+      setDrawerWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inversor_agent_drawer_width', String(drawerWidth));
+    } catch {}
+  }, [drawerWidth]);
 
   // Ticker contextual seleccionado dentro del Agente
   const [contextTicker, setContextTicker] = useState<string>(activeStock?.ticker || 'NVDA');
@@ -483,6 +532,7 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
               <table
                 style={{
                   width: '100%',
+                  minWidth: '600px',
                   borderCollapse: 'collapse',
                   fontSize: '0.75rem',
                   textAlign: 'left',
@@ -777,17 +827,47 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
         >
           <aside
             style={{
-              width: 'min(540px, 100vw)',
+              width: `min(${drawerWidth}px, 100vw)`,
               height: '100vh',
               background: 'linear-gradient(180deg, #0b1120 0%, #070b14 100%)',
-              borderLeft: '1px solid rgba(56, 189, 248, 0.22)',
+              borderLeft: isResizing ? '2px solid var(--accent-cyan)' : '1px solid rgba(56, 189, 248, 0.22)',
               boxShadow: '-12px 0 40px rgba(0, 0, 0, 0.75)',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
+              position: 'relative',
+              userSelect: isResizing ? 'none' : 'auto',
+              transition: isResizing ? 'none' : 'width 0.18s ease-out',
             }}
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Tirador interactivo para redimensionar arrastrando */}
+            <div
+              onMouseDown={handleMouseDownResize}
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: '10px',
+                cursor: 'col-resize',
+                zIndex: 100,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: isResizing ? 'rgba(6, 182, 212, 0.25)' : 'transparent',
+              }}
+              title="Arrastra para ajustar el ancho de la ventana"
+            >
+              <div
+                style={{
+                  width: '3px',
+                  height: '42px',
+                  borderRadius: '3px',
+                  background: isResizing ? 'var(--accent-cyan)' : 'rgba(148, 163, 184, 0.4)',
+                }}
+              />
+            </div>
             {/* CABECERA DEL DRAWER */}
             <div
               style={{
@@ -841,7 +921,76 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {/* Selectores de ancho preestablecido */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  borderRadius: '7px',
+                  padding: '2px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)'
+                }}>
+                  <button
+                    onClick={() => setDrawerWidth(540)}
+                    style={{
+                      padding: '3px 7px',
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      background: drawerWidth <= 620 ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                      color: drawerWidth <= 620 ? '#38bdf8' : '#94a3b8',
+                      border: 'none',
+                      borderRadius: '5px',
+                      cursor: 'pointer'
+                    }}
+                    title="Ancho Compacto (540px)"
+                  >
+                    540px
+                  </button>
+                  <button
+                    onClick={() => setDrawerWidth(880)}
+                    style={{
+                      padding: '3px 7px',
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      background: drawerWidth > 620 && drawerWidth < 1050 ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                      color: drawerWidth > 620 && drawerWidth < 1050 ? '#38bdf8' : '#94a3b8',
+                      border: 'none',
+                      borderRadius: '5px',
+                      cursor: 'pointer'
+                    }}
+                    title="Ancho Amplio (880px) para Tablas"
+                  >
+                    880px
+                  </button>
+                  <button
+                    onClick={() => setDrawerWidth(1200)}
+                    style={{
+                      padding: '3px 7px',
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      background: drawerWidth >= 1050 ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                      color: drawerWidth >= 1050 ? '#38bdf8' : '#94a3b8',
+                      border: 'none',
+                      borderRadius: '5px',
+                      cursor: 'pointer'
+                    }}
+                    title="Ancho Máximo (1200px)"
+                  >
+                    Max
+                  </button>
+                </div>
+
+                {/* Botón toggle de alternar modo compacto / expandido */}
+                <button
+                  onClick={() => setDrawerWidth((prev) => (prev > 700 ? 540 : 920))}
+                  className="btn btn-secondary"
+                  style={{ padding: '6px 8px' }}
+                  title={drawerWidth > 700 ? 'Reducir a tamaño compacto (540px)' : 'Expandir ventana del agente'}
+                >
+                  {drawerWidth > 700 ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                </button>
+
                 <button
                   onClick={handleClearHistory}
                   className="btn btn-secondary"

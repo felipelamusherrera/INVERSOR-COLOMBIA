@@ -33,6 +33,7 @@ import { CandlestickChart } from './CandlestickChart';
 import { SectorNewsRadar } from './SectorNewsRadar';
 import { StockAIAnalysisPanel } from './StockAIAnalysisPanel';
 import { computeTechnicalSetup } from '../services/agentRagService';
+import { calculateNextEarningsDate } from '../utils/formatters';
 
 export interface PricePoint {
   date: string;
@@ -2116,9 +2117,11 @@ export const StockDetail: React.FC<StockDetailProps> = ({
               <span style={{ color: 'var(--text-secondary)' }}>Recomendación (1=Compra, 5=Venta):</span>
               <strong className="font-mono">{stock.recom?.toFixed(2) || '-'}</strong>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Fecha de Resultados:</span>
-              <strong className="font-mono">{stock.earnings_date || '-'}</strong>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Próximo Reporte:</span>
+              <strong className="font-mono" style={{ color: 'var(--accent-cyan)' }}>
+                {calculateNextEarningsDate(stock.earnings_date)}
+              </strong>
             </div>
 
             <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
