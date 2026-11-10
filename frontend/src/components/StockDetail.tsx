@@ -59,11 +59,14 @@ export interface QuarterlyFinancialPoint {
   quarterLabel: string; // e.g. "Q3 '26"
   date: string; // e.g. "2026-10-27"
   sales: number; // Ingresos trimestrales en USD
-  sales_yoy: number; // % YoY (mismo periodo año anterior)
+  sales_yoy: number; // % YoY (mismo periodo año anterior) - real no recalculado
+  sales_yoy_plot?: number; // Para trazado acotado sin romper el eje secundario
   sales_qoq: number; // % QoQ (periodo inmediatamente anterior)
   eps: number; // BPA trimestral en USD
-  eps_yoy: number; // % YoY (mismo periodo año anterior)
+  eps_yoy: number; // % YoY (mismo periodo año anterior) - real no recalculado
+  eps_yoy_plot?: number; // Para trazado acotado sin romper el eje secundario
   eps_qoq: number; // % QoQ (periodo inmediatamente anterior)
+  eps_over_limit?: boolean;
 }
 
 export type ActiveChartType = 'price' | 'rsi' | 'volume' | 'profit_m' | 'fcf' | 'sales' | 'eps';
@@ -167,8 +170,8 @@ function computeHistoricalFundamentals(points: PricePoint[], stock: StockRecord)
   const baseProfitM = stock.profit_m ?? (stock.oper_m ? stock.oper_m * 0.75 : 12.0);
   const baseIncome = stock.income ?? (stock.market_cap ? (stock.market_cap / (stock.pe && stock.pe > 0 ? stock.pe : 20)) : 500);
   const baseFCF = baseIncome * 0.85; // FCF estimado en ~85% del Ingreso Neto
-  const baseSalesYoY = stock.sales_yoy_ttm ?? (stock.sales_qq ?? 10.5);
-  const baseEpsYoY = stock.eps_yoy_ttm ?? (stock.eps_qq ?? 12.0);
+  const baseSalesYoY = stock.sales_qq ?? 10.5;
+  const baseEpsYoY = stock.eps_qq ?? 12.0;
 
   // Determinar trimestre ancla a partir de la fecha de reporte más reciente
   let latestReportYear = 2026;
@@ -275,8 +278,8 @@ export function generateQuarterlyFinancials(stock: StockRecord): QuarterlyFinanc
   // Crecimientos reportados:
   // NOTA CRÍTICA DE FINVIZ / SEC: 'eps_qq' y 'sales_qq' representan la variación de este trimestre
   // frente al MISMO trimestre del año anterior (YoY trimestral, q - 4), NO secuencial inmediato (q - 1).
-  const salesYoyQuarterRate = (stock.sales_qq !== undefined && stock.sales_qq !== null ? stock.sales_qq / 100 : (stock.sales_yoy_ttm ? stock.sales_yoy_ttm / 100 : 0.08));
-  const epsYoyQuarterRate = (stock.eps_qq !== undefined && stock.eps_qq !== null ? stock.eps_qq / 100 : (stock.eps_yoy_ttm ? stock.eps_yoy_ttm / 100 : 0.10));
+  const salesYoyQuarterRate = (stock.sales_qq !== undefined && stock.sales_qq !== null ? stock.sales_qq / 100 : 0.08);
+  const epsYoyQuarterRate = (stock.eps_qq !== undefined && stock.eps_qq !== null ? stock.eps_qq / 100 : 0.10);
   const annualSalesTTM = (stock.sales && stock.sales > 0 ? (stock.sales > 1e6 ? stock.sales : stock.sales * 1e6) : (stock.market_cap ? stock.market_cap * 0.35 : 25000000000));
   const annualEpsTTM = (stock.eps !== undefined && stock.eps !== null ? stock.eps : 4.0);
 
@@ -306,7 +309,7 @@ export function generateQuarterlyFinancials(stock: StockRecord): QuarterlyFinanc
     return x - Math.floor(x);
   };
 
-  const quartersRaw: { period: string; quarterLabel: string; date: string; sales: number; eps: number }[] = [];
+  const quartersRaw: { period: string; quarterLabel: string; date: string; sales: number; eps: number; isReportedQuarter: boolean }[] = [];
   const totalQ = 14;
 
   for (let q = totalQ - 1; q >= 0; q--) {
@@ -321,15 +324,22 @@ export function generateQuarterlyFinancials(stock: StockRecord): QuarterlyFinanc
     
     // Si es el último trimestre reportado y tenemos la fecha exacta de earnings, usarla
     let dStr: string;
-    if (q === 0 && exactEarningsDateStr) {
-      dStr = exactEarningsDateStr;
+    let isReportedQuarter = false;
+    if (q === 0) {
+      isReportedQuarter = true;
+      if (exactEarningsDateStr) {
+        dStr = exactEarningsDateStr;
+      } else {
+        const m = (qNum * 3);
+        dStr = `${yNum}-${String(m).padStart(2, '0')}-28`;
+      }
     } else {
       const m = (qNum * 3);
       dStr = `${yNum}-${String(m).padStart(2, '0')}-28`;
     }
 
     // Cálculo armónico del histórico de ventas y EPS:
-    // El desfase YoY (q = 4) respeta exactamente salesYoyQuarterRate y epsYoyQuarterRate
+    // Mantenemos el límite de escala visual para no colapsar la barra a cero si eps_qq es extremo
     let qSales: number;
     let qEps: number;
 
@@ -337,9 +347,11 @@ export function generateQuarterlyFinancials(stock: StockRecord): QuarterlyFinanc
       qSales = baseSalesQ;
       qEps = baseEpsQ;
     } else if (q === 4) {
-      // Mismo trimestre del año pasado: respeta exactamente el crecimiento YoY
-      qSales = baseSalesQ / (1 + salesYoyQuarterRate);
-      qEps = baseEpsQ / (1 + epsYoyQuarterRate);
+      // Mismo trimestre del año pasado: mantenemos el límite visual para barras
+      const cappedEpsRate = Math.min(epsYoyQuarterRate, 2.0);
+      const cappedSalesRate = Math.min(salesYoyQuarterRate, 1.5);
+      qSales = baseSalesQ / (1 + cappedSalesRate);
+      qEps = baseEpsQ / (1 + cappedEpsRate);
     } else {
       // Trimestres secuenciales con transición suave y curva estacional
       const yearsBack = q / 4;
@@ -356,7 +368,8 @@ export function generateQuarterlyFinancials(stock: StockRecord): QuarterlyFinanc
       quarterLabel,
       date: dStr,
       sales: Math.max(1000000, Number(qSales.toFixed(0))),
-      eps: Number(qEps.toFixed(2))
+      eps: Number(qEps.toFixed(2)),
+      isReportedQuarter
     });
   }
 
@@ -375,21 +388,40 @@ export function generateQuarterlyFinancials(stock: StockRecord): QuarterlyFinanc
       eps_qoq = Number((stock.eps_qq ?? 3.0).toFixed(2));
     }
 
-    if (idx >= 4) {
+    // Regla solicitada: mantener el límite visual del gráfico, pero NO recalcular el % de crecimiento reportado.
+    // Para el trimestre reportado, usar el dato oficial de Finviz/SEC directamente.
+    if (item.isReportedQuarter) {
+      eps_yoy = stock.eps_qq !== undefined && stock.eps_qq !== null 
+        ? Number(stock.eps_qq.toFixed(2)) 
+        : (idx >= 4 ? Number((((item.eps - quartersRaw[idx - 4].eps) / Math.abs(quartersRaw[idx - 4].eps || 1)) * 100).toFixed(2)) : 6.0);
+
+      sales_yoy = stock.sales_qq !== undefined && stock.sales_qq !== null 
+        ? Number(stock.sales_qq.toFixed(2)) 
+        : (idx >= 4 ? Number((((item.sales - quartersRaw[idx - 4].sales) / Math.abs(quartersRaw[idx - 4].sales || 1)) * 100).toFixed(2)) : 5.0);
+    } else if (idx >= 4) {
       const prev4 = quartersRaw[idx - 4];
       sales_yoy = Number((((item.sales - prev4.sales) / Math.abs(prev4.sales || 1)) * 100).toFixed(2));
       eps_yoy = Number((((item.eps - prev4.eps) / Math.abs(prev4.eps || 1)) * 100).toFixed(2));
     } else {
-      sales_yoy = Number((stock.sales_yoy_ttm ?? 5.0).toFixed(2));
-      eps_yoy = Number((stock.eps_yoy_ttm ?? 6.0).toFixed(2));
+      sales_yoy = Number((stock.sales_qq ?? 5.0).toFixed(2));
+      eps_yoy = Number((stock.eps_qq ?? 6.0).toFixed(2));
     }
+
+    // Límite de escala gráfica: acotar para trazado de línea SVG sin alterar el porcentaje real del tooltip ni de la tarjeta
+    const GRAPH_CLAMP = 250;
+    const eps_over_limit = Math.abs(eps_yoy) > GRAPH_CLAMP;
+    const eps_yoy_plot = Math.max(-GRAPH_CLAMP, Math.min(GRAPH_CLAMP, eps_yoy));
+    const sales_yoy_plot = Math.max(-GRAPH_CLAMP, Math.min(GRAPH_CLAMP, sales_yoy));
 
     return {
       ...item,
       sales_qoq,
       sales_yoy,
+      sales_yoy_plot,
       eps_qoq,
-      eps_yoy
+      eps_yoy,
+      eps_yoy_plot,
+      eps_over_limit
     };
   });
 }
@@ -1229,6 +1261,22 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                         📊 Columnas + Eje Secundario %
                       </span>
                     )}
+                    {activeChart === 'eps' && Math.abs(stock.eps_qq ?? 0) > 200 && (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        fontSize: '0.74rem',
+                        fontWeight: 700,
+                        background: 'rgba(245, 158, 11, 0.15)',
+                        color: '#f59e0b',
+                        border: '1px solid rgba(245, 158, 11, 0.3)'
+                      }}>
+                        ⚠️ % &gt; límite gráfico, ver análisis
+                      </span>
+                    )}
                   </div>
                   <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginTop: '4px' }}>
                     {activeChart === 'sales'
@@ -1412,7 +1460,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                           const p = payload?.[0]?.payload;
                           return p ? `📅 ${p.period} (Reporte: ${p.date})` : _label;
                         }}
-                        formatter={(value: any, name: any) => {
+                        formatter={(value: any, name: any, item: any) => {
                           const num = Number(value);
                           if (isNaN(num)) return [value, name];
                           if (name === 'Ingresos Trimestrales') {
@@ -1420,6 +1468,17 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                           }
                           if (name === 'BPA (EPS) Trimestral') {
                             return [`$ ${num.toFixed(2).replace('.', ',')} USD`, name];
+                          }
+                          // Para YoY, mostrar el % real sin recalcular y si supera el límite visual del gráfico, agregar el distintivo solicitado
+                          const p = item?.payload;
+                          if (String(name).includes('YoY')) {
+                            const realYoy = activeChart === 'sales' ? (p?.sales_yoy ?? num) : (p?.eps_yoy ?? num);
+                            const isOver = Math.abs(realYoy) > 250;
+                            const formattedVal = `${realYoy >= 0 ? '+' : ''}${realYoy.toFixed(2).replace('.', ',')}%`;
+                            return [
+                              isOver ? `${formattedVal} (% > límite gráfico, ver análisis)` : formattedVal,
+                              name
+                            ];
                           }
                           return [`${num >= 0 ? '+' : ''}${num.toFixed(2).replace('.', ',')}%`, name];
                         }}
@@ -1458,10 +1517,11 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                       )}
 
                       {/* 2. Línea 1 en Eje Secundario: % Crecimiento vs Año Anterior en el Mismo Periodo (YoY) */}
+                      {/* Se traza acotado con sales_yoy_plot / eps_yoy_plot para mantener la escala del eje, mientras el tooltip y tarjetas muestran el % real */}
                       <Line 
                         yAxisId="right" 
                         type="monotone" 
-                        dataKey={activeChart === 'sales' ? 'sales_yoy' : 'eps_yoy'} 
+                        dataKey={activeChart === 'sales' ? 'sales_yoy_plot' : 'eps_yoy_plot'} 
                         name="% Crecimiento YoY (mismo periodo año anterior)" 
                         stroke="#06b6d4" 
                         strokeWidth={2.5} 
@@ -2009,15 +2069,22 @@ export const StockDetail: React.FC<StockDetailProps> = ({
               <span style={{ color: 'var(--text-secondary)' }}>Deuda / Patrimonio (D/E):</span>
               <strong className="font-mono">{stock.debt_eq?.toFixed(2) || '-'}</strong>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Crecimiento EPS (QoQ):</span>
-              <strong className="font-mono" style={{ color: stock.eps_qq && stock.eps_qq > 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-                {stock.eps_qq !== undefined && stock.eps_qq !== null ? `${stock.eps_qq.toFixed(2)}%` : '-'}
-              </strong>
+              <div style={{ textAlign: 'right' }}>
+                <strong className="font-mono" style={{ color: stock.eps_qq && stock.eps_qq > 0 ? 'var(--accent-green)' : (stock.eps_qq ? 'var(--accent-red)' : 'var(--text-muted)') }}>
+                  {stock.eps_qq !== undefined && stock.eps_qq !== null ? `${stock.eps_qq.toFixed(2)}%` : 'Sin dato SEC'}
+                </strong>
+                {stock.eps_qq !== undefined && stock.eps_qq !== null && Math.abs(stock.eps_qq) > 200 && (
+                  <div style={{ fontSize: '0.65rem', color: '#f59e0b', fontWeight: 700 }}>
+                    % &gt; límite gráfico, ver análisis
+                  </div>
+                )}
+              </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Crecimiento Ventas (QoQ):</span>
-              <strong className="font-mono">{stock.sales_qq !== undefined && stock.sales_qq !== null ? `${stock.sales_qq.toFixed(2)}%` : '-'}</strong>
+              <strong className="font-mono">{stock.sales_qq !== undefined && stock.sales_qq !== null ? `${stock.sales_qq.toFixed(2)}%` : 'Sin dato SEC'}</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Efectivo por Acción:</span>

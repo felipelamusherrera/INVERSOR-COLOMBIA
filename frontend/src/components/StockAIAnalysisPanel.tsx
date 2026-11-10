@@ -508,18 +508,85 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>Escala de balance</div>
               </div>
 
-              <div style={{ background: '#070b14', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Ventas YoY TTM</div>
-                <div className="font-mono" style={{ fontSize: '1.25rem', fontWeight: 800, color: (stock.sales_yoy_ttm ?? 0) >= 0 ? 'var(--accent-green)' : '#ef4444' }}>
-                  {formatPercentage(stock.sales_yoy_ttm)}
+              <div style={{ background: '#070b14', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Ventas YoY</div>
+                <div className="font-mono" style={{ 
+                  fontSize: stock.sales_qq !== undefined && stock.sales_qq !== null ? '1.25rem' : '0.90rem', 
+                  fontWeight: 800, 
+                  color: stock.sales_qq !== undefined && stock.sales_qq !== null 
+                    ? (stock.sales_qq >= 0 ? 'var(--accent-green)' : '#ef4444') 
+                    : 'var(--text-muted)',
+                  margin: '4px 0'
+                }}>
+                  {stock.sales_qq !== undefined && stock.sales_qq !== null ? (
+                    formatPercentage(stock.sales_qq)
+                  ) : (
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      border: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}>
+                      Sin dato SEC
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>Tracción de facturación</div>
               </div>
 
-              <div style={{ background: '#070b14', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ background: '#070b14', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                 <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Crecimiento EPS Q/Q</div>
-                <div className="font-mono" style={{ fontSize: '1.25rem', fontWeight: 800, color: ((stock.eps_qq ?? stock.eps_yoy_ttm ?? 0) >= 0) ? 'var(--accent-green)' : '#ef4444' }}>
-                  {formatPercentage(stock.eps_qq ?? stock.eps_yoy_ttm)}
+                <div>
+                  <div className="font-mono" style={{ 
+                    fontSize: stock.eps_qq !== undefined && stock.eps_qq !== null ? '1.25rem' : '0.90rem', 
+                    fontWeight: 800, 
+                    color: stock.eps_qq !== undefined && stock.eps_qq !== null 
+                      ? (stock.eps_qq >= 0 ? 'var(--accent-green)' : '#ef4444') 
+                      : 'var(--text-muted)',
+                    margin: '4px 0'
+                  }}>
+                    {stock.eps_qq !== undefined && stock.eps_qq !== null ? (
+                      formatPercentage(stock.eps_qq)
+                    ) : (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        color: 'var(--text-secondary)',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        border: '1px solid rgba(255, 255, 255, 0.1)'
+                      }}>
+                        Sin dato SEC
+                      </span>
+                    )}
+                  </div>
+                  {stock.eps_qq !== undefined && stock.eps_qq !== null && Math.abs(stock.eps_qq) > 200 && (
+                    <div style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      background: 'rgba(245, 158, 11, 0.15)',
+                      color: '#f59e0b',
+                      fontSize: '0.66rem',
+                      fontWeight: 700,
+                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                      marginBottom: '4px'
+                    }}>
+                      % &gt; límite gráfico, ver análisis
+                    </div>
+                  )}
                 </div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>Aceleración de beneficio</div>
               </div>
