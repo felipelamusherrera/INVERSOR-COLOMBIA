@@ -331,6 +331,23 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
     return map;
   }, [stocks]);
 
+  // Lista de acciones seleccionables completa para el dropdown (incluyendo contextTicker y activeStock)
+  const selectableStocks = useMemo(() => {
+    const map = new Map<string, StockRecord>();
+    if (contextTicker && validTickersMap.has(contextTicker)) {
+      map.set(contextTicker, validTickersMap.get(contextTicker)!);
+    }
+    if (activeStock?.ticker) {
+      map.set(activeStock.ticker, activeStock);
+    }
+    for (const s of stocks) {
+      if (!map.has(s.ticker)) {
+        map.set(s.ticker, s);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
+  }, [stocks, contextTicker, activeStock, validTickersMap]);
+
   // Renderizador de texto enriquecido (Tablas Markdown, Negritas y Tickers Clicables)
   const renderFormattedInline = (text: string) => {
     const parts = text.split(/(\*\*.*?\*\*|`.*?`)/g);
@@ -543,6 +560,43 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
           </h3>
         );
         i++;
+        continue;
+      }
+
+      if (line.startsWith('#### 🛡️ Auditoría de Fuentes')) {
+        const auditLines: string[] = [];
+        i++;
+        while (i < lines.length && (lines[i].trim().startsWith('* ') || lines[i].trim().startsWith('- ') || lines[i].trim() === '')) {
+          if (lines[i].trim()) auditLines.push(lines[i].trim().replace(/^[\*\-]\s+/, ''));
+          i++;
+        }
+        elements.push(
+          <div
+            key={`audit-box-${i}`}
+            style={{
+              marginTop: '12px',
+              padding: '12px 14px',
+              borderRadius: '8px',
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.35)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+              <ShieldCheck size={15} color="#10b981" />
+              <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                Auditoría de Fuentes & Integridad de Datos (Estándar auditor-inversor)
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '0.75rem', color: '#cbd5e1' }}>
+              {auditLines.map((al, alIdx) => (
+                <div key={alIdx} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', lineHeight: 1.5 }}>
+                  <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                  <div style={{ flex: 1 }}>{renderFormattedInline(al)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
         continue;
       }
 
@@ -826,7 +880,12 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
                 </span>
                 <select
                   value={contextTicker}
-                  onChange={(e) => setContextTicker(e.target.value)}
+                  onChange={(e) => {
+                    const chosen = e.target.value;
+                    setContextTicker(chosen);
+                    const st = validTickersMap.get(chosen);
+                    if (st) onSelectStock(st);
+                  }}
                   style={{
                     background: '#0f172a',
                     color: '#34d399',
@@ -840,7 +899,7 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
                     cursor: 'pointer',
                   }}
                 >
-                  {stocks.slice(0, 120).map((s) => (
+                  {selectableStocks.map((s) => (
                     <option key={s.ticker} value={s.ticker}>
                       {s.ticker} — {s.company?.slice(0, 22)} (${s.price?.toFixed(2)})
                     </option>

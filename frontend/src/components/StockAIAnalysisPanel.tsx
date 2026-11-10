@@ -518,8 +518,8 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
 
               <div style={{ background: '#070b14', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
                 <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Crecimiento EPS Q/Q</div>
-                <div className="font-mono" style={{ fontSize: '1.25rem', fontWeight: 800, color: (stock.eps_growth_q_q ?? 0) >= 0 ? 'var(--accent-green)' : '#ef4444' }}>
-                  {formatPercentage(stock.eps_growth_q_q)}
+                <div className="font-mono" style={{ fontSize: '1.25rem', fontWeight: 800, color: ((stock.eps_qq ?? stock.eps_yoy_ttm ?? 0) >= 0) ? 'var(--accent-green)' : '#ef4444' }}>
+                  {formatPercentage(stock.eps_qq ?? stock.eps_yoy_ttm)}
                 </div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>Aceleración de beneficio</div>
               </div>
