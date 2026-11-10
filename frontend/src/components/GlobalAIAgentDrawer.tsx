@@ -23,6 +23,7 @@ import type {
   AgentPortfolioPositionInput,
   AgentPortfolioSnapshot,
   AgentQuickAction,
+  ScreenerUIFilterPayload,
 } from '../types/agent';
 import { queryInversorAIAgent } from '../services/agentRagService';
 
@@ -35,6 +36,7 @@ interface GlobalAIAgentDrawerProps {
   currentTab: string;
   onSelectStock: (stock: StockRecord) => void;
   onNavigateTab?: (tab: string) => void;
+  onApplyScreenerFilters?: (filters: ScreenerUIFilterPayload) => void;
   externalPromptTrigger?: { prompt: string; intent?: AgentIntentType; timestamp: number } | null;
 }
 
@@ -49,6 +51,7 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
   currentTab,
   onSelectStock,
   onNavigateTab,
+  onApplyScreenerFilters,
   externalPromptTrigger,
 }) => {
   const [inputMessage, setInputMessage] = useState('');
@@ -287,6 +290,7 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
         dataSources: response.dataSources,
         suggestedFollowUps: response.suggestedFollowUps,
         screenerFilterPayload: response.screenerFilterPayload,
+        screenerUIFilters: response.screenerUIFilters,
       };
 
       setMessages((prev) => [...prev, assistantMsg]);
@@ -1011,14 +1015,26 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
                         <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                           <button
                             onClick={() => {
+                              if (msg.screenerUIFilters && onApplyScreenerFilters) {
+                                onApplyScreenerFilters(msg.screenerUIFilters);
+                              }
                               onNavigateTab('screener');
                               onClose();
                             }}
-                            className="btn btn-secondary"
-                            style={{ width: '100%', justifyContent: 'center', fontSize: '0.75rem', padding: '6px 12px' }}
+                            className="btn"
+                            style={{
+                              width: '100%',
+                              justifyContent: 'center',
+                              fontSize: '0.76rem',
+                              fontWeight: 700,
+                              padding: '7px 12px',
+                              background: 'rgba(16, 185, 129, 0.16)',
+                              border: '1px solid rgba(16, 185, 129, 0.4)',
+                              color: '#34d399',
+                            }}
                           >
-                            <Layers size={13} color="#10b981" />
-                            Abrir Módulo Screener Acciones Completo
+                            <Layers size={13} color="#34d399" />
+                            Aplicar estos Filtros en la Tabla del Screener Acciones
                           </button>
                         </div>
                       )}

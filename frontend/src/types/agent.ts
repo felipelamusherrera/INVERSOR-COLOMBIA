@@ -38,6 +38,7 @@ export interface AgentConversationMessage {
   dataSources?: string[];
   suggestedFollowUps?: AgentQuickAction[];
   screenerFilterPayload?: Record<string, string>;
+  screenerUIFilters?: ScreenerUIFilterPayload;
 }
 
 export interface AgentQuickAction {
@@ -88,6 +89,35 @@ export interface AgentTechnicalSetup {
   target2Pct: number;
   riskRewardT1: number;
   riskRewardT2: number;
+  // Fase 3: Análisis de serie de velas de 6 meses (OHLCV)
+  candlesAnalyzedCount: number;
+  sixMonthHigh: number;
+  sixMonthLow: number;
+  support20D: number;
+  resistance20D: number;
+  realAtr14: number;
+  volumeAccumulationRatio: number;
+  detectedChartPattern: string;
+}
+
+export interface ScreenerUIFilterPayload {
+  sectorFilter?: string;
+  marketCapFilter?: string;
+  peFilter?: string;
+  forwardPeFilter?: string;
+  pegFilter?: string;
+  roicFilter?: string;
+  profitMarginFilter?: string;
+  debtEquityFilter?: string;
+  currentRatioFilter?: string;
+  salesGrowthTtmFilter?: string;
+  epsGrowthQtrFilter?: string;
+  rsiFilter?: string;
+  sma50Filter?: string;
+  sma200Filter?: string;
+  presetFilter?: string;
+  tickerQuery?: string;
+  summaryText?: string;
 }
 
 export interface AgentRAGContext {
@@ -98,6 +128,7 @@ export interface AgentRAGContext {
   technicalSetup: AgentTechnicalSetup | null;
   screenerMatches: StockRecord[];
   screenerAppliedFilters?: Record<string, string>;
+  screenerUIFilters?: ScreenerUIFilterPayload;
   portfolioSnapshot?: AgentPortfolioSnapshot;
   snapshotDate: string;
 }
@@ -115,5 +146,6 @@ export interface AgentChatResponse {
   };
   suggestedFollowUps: AgentQuickAction[];
   screenerFilterPayload?: Record<string, string>;
+  screenerUIFilters?: ScreenerUIFilterPayload;
   timestamp: string;
 }

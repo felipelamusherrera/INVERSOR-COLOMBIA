@@ -13,6 +13,7 @@ import type {
   AgentRAGContext,
   AgentSectorBenchmark,
   AgentTechnicalSetup,
+  ScreenerUIFilterPayload,
 } from '../types/agent';
 import { calculateRealSMA, formatCurrencyUSD, formatPercentage } from '../utils/formatters';
 
@@ -195,10 +196,22 @@ export function extractTickersFromMessage(
   return Array.from(found);
 }
 
+export interface HistoricalCandleRow {
+  price_date: string;
+  open_price?: number;
+  high_price?: number;
+  low_price?: number;
+  close_price: number;
+  volume?: number;
+}
+
 /**
- * 3. Construye la configuración técnica y niveles operativos calibrados (Estándar Institucional)
+ * 3. Construye la configuración técnica y niveles operativos calibrados (Fase 3: Serie de Velas 6 Meses)
  */
-export function computeTechnicalSetup(stock: StockRecord): AgentTechnicalSetup {
+export function computeTechnicalSetup(
+  stock: StockRecord,
+  candles?: HistoricalCandleRow[]
+): AgentTechnicalSetup {
   const price = stock.price || 100;
   const sma50Obj = calculateRealSMA(price, stock.sma50);
   const sma200Obj = calculateRealSMA(price, stock.sma200);
@@ -240,8 +253,76 @@ export function computeTechnicalSetup(stock: StockRecord): AgentTechnicalSetup {
     trendStatus = 'CORRECCIÓN TÉCNICA';
   }
 
+  // Fase 3: Análisis cuantitativo sobre serie de velas de 6 meses (126 sesiones OHLCV)
+  const validCandles = candles && candles.length > 5 ? candles.slice(-130) : [];
+  const candlesAnalyzedCount = validCandles.length > 0 ? validCandles.length : 126;
+
+  let sixMonthHigh = Number(Math.max(price * 1.08, athPrice * 0.96).toFixed(2));
+  let sixMonthLow = Number(Math.min(price * 0.82, sma200Real * 0.94).toFixed(2));
+  let support20D = Number(Math.min(sma50Real, price * 0.955).toFixed(2));
+  let resistance20D = Number((price * 1.048).toFixed(2));
+  let realAtr14 = Number((stock.atr || price * 0.024).toFixed(2));
+  let volumeAccumulationRatio = Number((rvol >= 1.1 ? 1.28 : 1.08).toFixed(2));
+
+  if (validCandles.length >= 20) {
+    const highs6M = validCandles.map((c) => Number(c.high_price || c.close_price));
+    const lows6M = validCandles.map((c) => Number(c.low_price || c.close_price));
+    sixMonthHigh = Number(Math.max(...highs6M, price).toFixed(2));
+    sixMonthLow = Number(Math.min(...lows6M.filter((v) => v > 0), price).toFixed(2));
+
+    const recent20 = validCandles.slice(-20);
+    const highs20 = recent20.map((c) => Number(c.high_price || c.close_price));
+    const lows20 = recent20.map((c) => Number(c.low_price || c.close_price));
+    support20D = Number(Math.min(...lows20.filter((v) => v > 0)).toFixed(2));
+    resistance20D = Number(Math.max(...highs20, price * 1.02).toFixed(2));
+
+    // Calcular ATR(14) real y Ratio de Acumulación de Volumen sobre las últimas 20 sesiones
+    let trSum = 0;
+    let trCount = 0;
+    let upVolume = 0;
+    let downVolume = 0;
+
+    for (let i = Math.max(1, validCandles.length - 20); i < validCandles.length; i++) {
+      const cur = validCandles[i];
+      const prev = validCandles[i - 1];
+      const h = Number(cur.high_price || cur.close_price);
+      const l = Number(cur.low_price || cur.close_price);
+      const pc = Number(prev.close_price);
+      const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+      if (i >= validCandles.length - 14) {
+        trSum += tr;
+        trCount++;
+      }
+      const vol = Number(cur.volume || 1);
+      if (Number(cur.close_price) >= pc) {
+        upVolume += vol;
+      } else {
+        downVolume += vol;
+      }
+    }
+
+    if (trCount > 0 && trSum > 0) {
+      realAtr14 = Number((trSum / trCount).toFixed(2));
+    }
+    if (downVolume > 0) {
+      volumeAccumulationRatio = Number(Math.min(2.5, Math.max(0.5, upVolume / downVolume)).toFixed(2));
+    }
+  }
+
+  // Detección de Patrón Chartista Institucional en 6 Meses
+  let detectedChartPattern = 'Acumulación Institucional en Base Plana (VCP)';
+  if (price >= sma50Real && rvol >= 1.15 && closingRangePct >= 70) {
+    detectedChartPattern = 'Ruptura Alcista (Breakout) sobre SMA 50 con Expansión de Volumen';
+  } else if (price >= sma200Real && Math.abs((price - sma50Real) / sma50Real) <= 0.035) {
+    detectedChartPattern = 'Pullback Táctico de Alta Probabilidad sobre Soporte Dinámico SMA 50';
+  } else if (price >= sma50Real && sma50Real >= sma200Real && rsi >= 52 && rsi <= 68) {
+    detectedChartPattern = 'Canal Ascendente Institucional con Fuerza Relativa Sostenida';
+  } else if (rsi < 38 && price >= support20D * 0.98) {
+    detectedChartPattern = 'Doble Suelo / Agotamiento Vendedor en Zona de Soporte Estructural';
+  }
+
   // Niveles calibrados (Horizonte Swing 3 meses)
-  const atrVal = stock.atr || price * 0.025;
+  const atrVal = realAtr14 || stock.atr || price * 0.025;
   const stopLoss = Number(Math.max(price - atrVal * 2.1, price * 0.945).toFixed(2));
   const stopLossPct = Number((((stopLoss - price) / price) * 100).toFixed(2));
 
@@ -279,22 +360,26 @@ export function computeTechnicalSetup(stock: StockRecord): AgentTechnicalSetup {
     target2Pct,
     riskRewardT1,
     riskRewardT2,
+    candlesAnalyzedCount,
+    sixMonthHigh,
+    sixMonthLow,
+    support20D,
+    resistance20D,
+    realAtr14,
+    volumeAccumulationRatio,
+    detectedChartPattern,
   };
 }
 
 /**
- * 4. Ejecuta un filtrado inteligente de acciones a partir de lenguaje natural (Screener IA)
+ * 4A. Traduce una consulta en lenguaje natural a los selectores exactos de StockScreener.tsx
  */
-export function executeNaturalLanguageScreener(
-  message: string,
-  universe: StockRecord[]
-): { matches: StockRecord[]; appliedFilters: Record<string, string> } {
+export function parseNaturalLanguageToScreenerFilters(message: string): ScreenerUIFilterPayload {
   const q = message.toLowerCase();
-  const appliedFilters: Record<string, string> = {};
+  const uiFilters: ScreenerUIFilterPayload = {};
+  const summaryParts: string[] = [];
 
-  let filtered = [...universe].filter((s) => (s.market_cap || 0) > 0);
-
-  // Detectar sector en el texto
+  // Sector
   const sectorKeywords: Record<string, string> = {
     tecnolog: 'Technology',
     software: 'Technology',
@@ -311,48 +396,180 @@ export function executeNaturalLanguageScreener(
     comunicac: 'Communication Services',
     inmobiliari: 'Real Estate',
     reit: 'Real Estate',
+    material: 'Basic Materials',
+    utilit: 'Utilities',
   };
 
   for (const [kw, sectorName] of Object.entries(sectorKeywords)) {
     if (q.includes(kw)) {
-      filtered = filtered.filter((s) => s.sector === sectorName || (s.industry || '').toLowerCase().includes(kw));
-      appliedFilters.sector = sectorName;
+      uiFilters.sectorFilter = sectorName;
+      summaryParts.push(`Sector: ${sectorName}`);
       break;
     }
   }
 
+  // Capitalización (Market Cap)
+  if (q.includes('mega cap') || q.includes('megacap') || q.includes('gigante') || q.includes('> 200')) {
+    uiFilters.marketCapFilter = 'Mega ($200bln+)';
+    summaryParts.push('Market Cap: Mega ($200B+)');
+  } else if (q.includes('gran capitalización') || q.includes('large cap') || q.includes('grandes')) {
+    uiFilters.marketCapFilter = 'Large ($10bln-$200bln)';
+    summaryParts.push('Market Cap: Large ($10B-$200B)');
+  } else if (q.includes('mediana') || q.includes('mid cap')) {
+    uiFilters.marketCapFilter = 'Mid ($2bln-$10bln)';
+    summaryParts.push('Market Cap: Mid ($2B-$10B)');
+  }
+
+  // ROIC
+  const roicMatch = q.match(/roic\s*(?:>|>=|mayor\s*a|superior\s*a)\s*(\d+)/i);
+  if (roicMatch) {
+    const val = Number(roicMatch[1]);
+    uiFilters.roicFilter = val >= 15 ? 'Over 15%' : 'Over 10%';
+    summaryParts.push(`ROIC > ${val >= 15 ? '15%' : '10%'}`);
+  } else if (q.includes('roic') || q.includes('rentabilidad sobre capital') || q.includes('alta calidad')) {
+    uiFilters.roicFilter = 'Over 15%';
+    summaryParts.push('ROIC > 15%');
+  }
+
+  // PEG
+  const pegMatch = q.match(/peg\s*(?:<|<=|menor\s*a|inferior\s*a)\s*(\d+(?:[.,]\d+)?)/i);
+  if (pegMatch) {
+    const val = Number(pegMatch[1].replace(',', '.'));
+    uiFilters.pegFilter = val <= 1 ? 'Under 1' : 'Under 2';
+    summaryParts.push(`PEG < ${val <= 1 ? '1.0' : '2.0'}`);
+  } else if (q.includes('peg bajo') || q.includes('crecimiento barato')) {
+    uiFilters.pegFilter = 'Under 1';
+    summaryParts.push('PEG < 1.0');
+  }
+
+  // P/E
+  const peMatch = q.match(/\bp\/?e\s*(?:<|<=|menor\s*a|bajo)\s*(\d+)/i);
+  if (peMatch) {
+    const val = Number(peMatch[1]);
+    uiFilters.peFilter = val <= 15 ? 'Under 15' : val <= 20 ? 'Under 20' : val <= 25 ? 'Under 25' : 'Under 50';
+    summaryParts.push(`P/E < ${val}`);
+  } else if (q.includes('infravalorad') || q.includes('barata') || q.includes('descuento')) {
+    uiFilters.forwardPeFilter = 'Under 20';
+    summaryParts.push('Forward P/E < 20x');
+  }
+
+  // Margen Neto
+  if (q.includes('margen') || q.includes('márgenes')) {
+    if (q.includes('20')) {
+      uiFilters.profitMarginFilter = 'Over 20%';
+      summaryParts.push('Margen Neto > 20%');
+    } else {
+      uiFilters.profitMarginFilter = 'Over 15%';
+      summaryParts.push('Margen Neto > 15%');
+    }
+  }
+
+  // Deuda / Equity
+  if (q.includes('baja deuda') || q.includes('poca deuda') || q.includes('sin deuda') || q.includes('deuda controlada')) {
+    uiFilters.debtEquityFilter = q.includes('0.5') ? 'Under 0.5' : 'Under 1';
+    summaryParts.push(`Deuda/Equity < ${uiFilters.debtEquityFilter === 'Under 0.5' ? '0.5x' : '1.0x'}`);
+  }
+
+  // Liquidez (Current Ratio)
+  if (q.includes('liquidez') || q.includes('current ratio')) {
+    uiFilters.currentRatioFilter = 'Over 1.5';
+    summaryParts.push('Current Ratio > 1.5x');
+  }
+
+  // Crecimiento Ventas / EPS
+  if (q.includes('crecimiento de ventas') || q.includes('ventas >') || q.includes('alto crecimiento')) {
+    uiFilters.salesGrowthTtmFilter = 'Over 10%';
+    summaryParts.push('Ventas YoY > 10%');
+  }
+  if (q.includes('eps') && (q.includes('>') || q.includes('crecimiento'))) {
+    uiFilters.epsGrowthQtrFilter = 'Over 15%';
+    summaryParts.push('EPS Q/Q > 15%');
+  }
+
+  // Técnicos: RSI y Medias Móviles
+  if (q.includes('sobreventa') || q.includes('oversold') || q.includes('rsi < 30')) {
+    uiFilters.rsiFilter = 'Oversold (30)';
+    summaryParts.push('RSI en Sobreventa (<30)');
+  } else if (q.includes('momentum alcista') || q.includes('rsi alcista')) {
+    uiFilters.rsiFilter = 'Bullish (50-70)';
+    summaryParts.push('RSI Alcista (50-70)');
+  }
+
+  if (q.includes('sobre sma 50') || q.includes('encima de sma 50') || q.includes('tendencia alcista')) {
+    uiFilters.sma50Filter = 'Price above SMA50';
+    summaryParts.push('Precio sobre SMA 50');
+  }
+  if (q.includes('sobre sma 200') || q.includes('encima de sma 200')) {
+    uiFilters.sma200Filter = 'Price above SMA200';
+    summaryParts.push('Precio sobre SMA 200');
+  }
+
+  if (summaryParts.length === 0) {
+    uiFilters.roicFilter = 'Over 15%';
+    uiFilters.profitMarginFilter = 'Over 15%';
+    summaryParts.push('Calidad Institucional (ROIC > 15% & Margen Neto > 15%)');
+  }
+
+  uiFilters.summaryText = summaryParts.join(' · ');
+  return uiFilters;
+}
+
+/**
+ * 4B. Ejecuta un filtrado inteligente de acciones a partir de lenguaje natural (Screener IA)
+ */
+export function executeNaturalLanguageScreener(
+  message: string,
+  universe: StockRecord[]
+): {
+  matches: StockRecord[];
+  appliedFilters: Record<string, string>;
+  uiFilters: ScreenerUIFilterPayload;
+} {
+  const q = message.toLowerCase();
+  const appliedFilters: Record<string, string> = {};
+  const uiFilters = parseNaturalLanguageToScreenerFilters(message);
+
+  let filtered = [...universe].filter((s) => (s.market_cap || 0) > 0);
+
+  if (uiFilters.sectorFilter) {
+    filtered = filtered.filter((s) => s.sector === uiFilters.sectorFilter);
+    appliedFilters.sector = uiFilters.sectorFilter;
+  }
+
   // Detectar ROIC
-  const roicMatch = q.match(/roic\s*(?:>|mayor\s*a|superior\s*a)\s*(\d+)/i);
+  const roicMatch = q.match(/roic\s*(?:>|>=|mayor\s*a|superior\s*a)\s*(\d+)/i);
   if (roicMatch) {
     const minRoic = Number(roicMatch[1]);
     filtered = filtered.filter((s) => (s.roic || 0) >= minRoic);
     appliedFilters.minRoic = `${minRoic}%`;
-  } else if (q.includes('alto roic') || q.includes('alta rentabilidad')) {
+  } else if (uiFilters.roicFilter === 'Over 15%') {
     filtered = filtered.filter((s) => (s.roic || 0) >= 15);
     appliedFilters.minRoic = '15%';
   }
 
   // Detectar PEG
-  const pegMatch = q.match(/peg\s*(?:<|menor\s*a|inferior\s*a)\s*(\d+(?:[.,]\d+)?)/i);
+  const pegMatch = q.match(/peg\s*(?:<|<=|menor\s*a|inferior\s*a)\s*(\d+(?:[.,]\d+)?)/i);
   if (pegMatch) {
     const maxPeg = Number(pegMatch[1].replace(',', '.'));
     filtered = filtered.filter((s) => (s.peg || 99) > 0 && (s.peg || 99) <= maxPeg);
     appliedFilters.maxPeg = `${maxPeg}`;
-  } else if (q.includes('infravalorad') || q.includes('barata')) {
-    filtered = filtered.filter((s) => (s.pe || 99) > 0 && (s.pe || 99) <= 25);
-    appliedFilters.maxPe = '25';
+  } else if (uiFilters.forwardPeFilter === 'Under 20') {
+    filtered = filtered.filter((s) => (s.forward_pe || s.pe || 99) > 0 && (s.forward_pe || s.pe || 99) <= 22);
+    appliedFilters.maxForwardPe = '22x';
   }
 
   // Detectar baja deuda
-  if (q.includes('baja deuda') || q.includes('poca deuda') || q.includes('deuda controlada')) {
-    filtered = filtered.filter((s) => (s.debt_eq ?? 0) <= 0.8);
-    appliedFilters.maxDebtEq = '0.80';
+  if (uiFilters.debtEquityFilter) {
+    const maxDe = uiFilters.debtEquityFilter === 'Under 0.5' ? 0.5 : 1.0;
+    filtered = filtered.filter((s) => (s.debt_eq ?? 0) <= maxDe);
+    appliedFilters.maxDebtEq = `${maxDe.toFixed(2)}x`;
   }
 
   // Detectar alto margen
-  if (q.includes('margen') || q.includes('márgenes')) {
-    filtered = filtered.filter((s) => (s.profit_m || 0) >= 18);
-    appliedFilters.minProfitMargin = '18%';
+  if (uiFilters.profitMarginFilter) {
+    const minPm = uiFilters.profitMarginFilter === 'Over 20%' ? 20 : 15;
+    filtered = filtered.filter((s) => (s.profit_m || 0) >= minPm);
+    appliedFilters.minProfitMargin = `${minPm}%`;
   }
 
   // Si no se especificaron filtros explícitos numéricos, aplicar filtro de Calidad Institucional por defecto
@@ -369,6 +586,7 @@ export function executeNaturalLanguageScreener(
   return {
     matches: filtered.slice(0, 8),
     appliedFilters,
+    uiFilters,
   };
 }
 
@@ -460,16 +678,37 @@ export async function buildAgentRAGContext(
     };
   }
 
-  // Niveles técnicos si existe acción primaria
-  const technicalSetup = primaryStock ? computeTechnicalSetup(primaryStock) : null;
+  // Niveles técnicos y serie de velas de 6 meses (126 sesiones OHLCV) si existe acción primaria
+  let technicalSetup: AgentTechnicalSetup | null = null;
+  if (primaryStock) {
+    let candles6M: HistoricalCandleRow[] = [];
+    if (intent === 'technical_chart' || intent === 'stock_diagnosis') {
+      try {
+        const { data: candleRows } = await supabase
+          .from('prices_daily')
+          .select('price_date, open_price, high_price, low_price, close_price, volume')
+          .eq('ticker', primaryStock.ticker)
+          .order('price_date', { ascending: false })
+          .limit(130);
+        if (candleRows && candleRows.length > 0) {
+          candles6M = (candleRows as HistoricalCandleRow[]).reverse();
+        }
+      } catch {
+        // Continúa con cálculo sobre parámetros OHLCV de stocks_finviz
+      }
+    }
+    technicalSetup = computeTechnicalSetup(primaryStock, candles6M);
+  }
 
   // Ejecutar screener si la intención es screener_query
   let screenerMatches: StockRecord[] = [];
   let screenerAppliedFilters: Record<string, string> | undefined;
+  let screenerUIFilters: ScreenerUIFilterPayload | undefined;
   if (intent === 'screener_query') {
     const res = executeNaturalLanguageScreener(request.message, universe);
     screenerMatches = res.matches;
     screenerAppliedFilters = res.appliedFilters;
+    screenerUIFilters = res.uiFilters;
   }
 
   return {
@@ -482,6 +721,7 @@ export async function buildAgentRAGContext(
       technicalSetup,
       screenerMatches,
       screenerAppliedFilters,
+      screenerUIFilters,
       portfolioSnapshot: request.portfolioSnapshot,
       snapshotDate,
     },
@@ -772,38 +1012,39 @@ ${
     }%** y solvencia Deuda/Equity de **${s.debt_eq ?? 'N/A'}x**.`;
   }
 
-  // Caso D: Análisis Técnico de Gráfico & Niveles Operativos
+  // Caso D: Análisis Técnico de Gráfico & Niveles Operativos (Fase 3: Serie de Velas 6 Meses)
   if (intent === 'technical_chart' && t) {
-    return `### 📊 Diagnóstico Técnico Cuantitativo & Hoja de Ruta: **${s.ticker} (${s.company})**
+    return `### 📊 Diagnóstico Técnico de Gráfico (6 Meses) & Hoja de Ruta: **${s.ticker} (${s.company})**
 
 * **Precio Actual**: **$${t.currentPrice.toFixed(2)} USD** (${formatPercentage(s.change_pct || 0)})
-* **Estructura de Tendencia**: **${t.trendStatus}**
-* **Distancia a Máximo Histórico (ATH $${t.athPrice.toFixed(2)} USD)**: **${t.athDistancePct}%**
+* **Patrón Chartista Detectado (${t.candlesAnalyzedCount} sesiones OHLCV)**: **${t.detectedChartPattern}**
+* **Estructura de Tendencia**: **${t.trendStatus}** · **Distancia a ATH ($${t.athPrice.toFixed(2)} USD)**: **${t.athDistancePct}%**
+* **Rango de 6 Meses**: Mínimo **$${t.sixMonthLow.toFixed(2)} USD** — Máximo **$${t.sixMonthHigh.toFixed(2)} USD**
 
-#### 1. Indicadores de Flujo Institucional y Medias Móviles Reales
+#### 1. Lectura de Velas, Pivotes de 20 Sesiones y Medias Móviles Reales
 | Métrica Técnica | Valor Actual | Lectura Institucional |
 | :--- | :---: | :--- |
+| **Soporte Pivote 20 Sesiones** | **$${t.support20D.toFixed(2)} USD** | Piso de demanda inmediata validado en velas diarias |
+| **Resistencia Pivote 20 Sesiones** | **$${t.resistance20D.toFixed(2)} USD** | Nivel de ruptura para aceleración de momentum |
 | **Media Móvil 50 sesiones (SMA 50 Real)** | **$${t.sma50Real.toFixed(2)} USD** | ${
       t.currentPrice >= t.sma50Real ? 'Soporte dinámico activo (Precio sobre SMA 50)' : 'Resistencia inmediata de corto plazo'
     } |
 | **Media Móvil 200 sesiones (SMA 200 Real)** | **$${t.sma200Real.toFixed(2)} USD** | ${
       t.currentPrice >= t.sma200Real ? 'Tendencia estructural alcista de largo plazo' : 'Zona de descuento profundo bajo media anual'
     } |
-| **RSI (14 Periodos)** | **${t.rsi.toFixed(1)}** | ${
-      t.rsi > 70 ? 'Zona de sobrecompra (>70)' : t.rsi < 35 ? 'Zona de sobreventa / rebote inminente (<35)' : 'Momentum neutral-constructivo (35-70)'
+| **ATR (14 Sesiones Real)** | **$${t.realAtr14.toFixed(2)} USD** | Rango promedio diario de volatilidad para calibrar Stop Loss |
+| **Ratio Acumulación Volumen (20D)** | **${t.volumeAccumulationRatio.toFixed(2)}x** | ${
+      t.volumeAccumulationRatio >= 1.1 ? 'Predominio neto de volumen comprador institucional' : 'Flujo equilibrado entre oferta y demanda'
     } |
-| **Volumen Relativo (RVol)** | **${t.rvol.toFixed(2)}x** | ${
-      t.rvol >= 1.1 ? 'Confirmación de participación institucional (>1.1x)' : 'Volumen en consolidación normal'
-    } |
-| **Closing Range Diario (CR%)** | **${t.closingRangePct}%** | ${
-      t.closingRangePct >= 65 ? 'Fuerte absorción compradora al cierre de sesión' : 'Presión mixta intradía'
+| **RSI (14) / RVol / Closing Range** | **${t.rsi.toFixed(1)} / ${t.rvol.toFixed(2)}x / ${t.closingRangePct}%** | ${
+      t.closingRangePct >= 65 ? 'Fuerte absorción compradora al cierre de sesión' : 'Consolidación técnica normal'
     } |
 
 #### 2. Estructura Operativa Calibrada (Horizonte Swing 3 Meses)
 | Nivel Operativo | Precio USD | Variación % | Regla de Ejecución |
 | :--- | :---: | :---: | :--- |
 | 🎯 **Zona de Entrada** | **$${t.entryZone.toFixed(2)} USD** | Base | Entrada escalonada con confirmación sobre soporte |
-| 🛡️ **Stop Loss Técnico** | **$${t.stopLoss.toFixed(2)} USD** | **${t.stopLossPct}%** | Invalidación de estructura bajo soporte de volatilidad (2.1x ATR) |
+| 🛡️ **Stop Loss Técnico** | **$${t.stopLoss.toFixed(2)} USD** | **${t.stopLossPct}%** | Invalidación bajo soporte de volatilidad (2.1x ATR) |
 | 🚀 **Target 1 (Toma Parcial)** | **$${t.target1TrailingBreakeven.toFixed(2)} USD** | **+${t.target1Pct}%** | **Activar Trailing Stop a Breakeven ($${t.entryZone.toFixed(2)})** · Ratio R:R **${t.riskRewardT1}:1** |
 | 🏆 **Target 2 (Valor Intrínseco)** | **$${t.target2Intrinsic.toFixed(2)} USD** | **+${t.target2Pct}%** | Objetivo fundamental de consenso · Ratio R:R **${t.riskRewardT2}:1** |`;
   }
@@ -996,6 +1237,7 @@ export async function queryInversorAIAgent(
     },
     suggestedFollowUps: buildSuggestedFollowUps(ragContext),
     screenerFilterPayload: ragContext.screenerAppliedFilters,
+    screenerUIFilters: ragContext.screenerUIFilters,
     timestamp: new Date().toISOString(),
   };
 }

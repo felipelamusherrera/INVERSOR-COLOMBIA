@@ -11,7 +11,7 @@ import { Watchlist } from './components/Watchlist';
 import { FinvizMap } from './components/FinvizMap';
 import { StrategyAIModule } from './components/StrategyAIModule';
 import { GlobalAIAgentDrawer } from './components/GlobalAIAgentDrawer';
-import type { AgentIntentType } from './types/agent';
+import type { AgentIntentType, ScreenerUIFilterPayload } from './types/agent';
 import { Toaster, toast } from 'sonner';
 import { AlertCircle, RefreshCw, Database, ShieldCheck } from 'lucide-react';
 
@@ -36,11 +36,15 @@ export function App() {
   const [openStockTabs, setOpenStockTabs] = useState<string[]>(['MU']);
   const [activeStockTicker, setActiveStockTicker] = useState<string | null>('MU');
 
-  // Estado del Drawer Flotante Global del Agente Inversor IA (Fase 2)
+  // Estado del Drawer Flotante Global del Agente Inversor IA (Fase 2 & Fase 3)
   const [isAgentDrawerOpen, setIsAgentDrawerOpen] = useState(false);
   const [agentExternalTrigger, setAgentExternalTrigger] = useState<{
     prompt: string;
     intent?: AgentIntentType;
+    timestamp: number;
+  } | null>(null);
+  const [externalScreenerFilters, setExternalScreenerFilters] = useState<{
+    filters: ScreenerUIFilterPayload;
     timestamp: number;
   } | null>(null);
 
@@ -282,12 +286,14 @@ export function App() {
               />
             )}
 
-            {/* 2. Screener Acciones Unificado (Finviz Filters + Screener Quant Styling) */}
+            {/* 2. Screener Acciones Unificado (Finviz Filters + Screener Quant Styling + Fase 3 Natural Language Filter) */}
             {(currentTab === 'screener' || currentTab === 'finviz-screener') && (
               <StockScreener
                 stocks={stocks}
                 onSelectStock={handleSelectStock}
                 selectedStock={currentActiveStock}
+                externalAIFilters={externalScreenerFilters}
+                onOpenAgentDrawerWithQuery={(query: string) => handleTriggerAgentPrompt(query, 'screener_query')}
               />
             )}
 
@@ -332,7 +338,7 @@ export function App() {
               />
             )}
 
-            {/* 8. Mi Cartera Mejorada (Posiciones Long/Short, P&L en vivo y Gráfico Multi-temporal) */}
+            {/* 8. Mi Cartera Mejorada (Posiciones Long/Short, P&L en vivo, Gráfico Multi-temporal y Auditoría IA Fase 3) */}
             {currentTab === 'watchlist' && (
               <Watchlist
                 stocks={stocks}
@@ -340,13 +346,19 @@ export function App() {
                 onToggleWatchlist={handleToggleWatchlist}
                 onSelectStock={handleSelectStock}
                 onGoToScreener={() => setCurrentTab('screener')}
+                onAuditPortfolioWithAI={() =>
+                  handleTriggerAgentPrompt(
+                    'Audita el estado actual de mi cartera: posiciones abiertas, peso porcentual por acción, concentración sectorial y liquidez en efectivo disponible.',
+                    'portfolio_audit'
+                  )
+                }
               />
             )}
           </>
         )}
       </main>
 
-      {/* Panel Flotante y Drawer Global del Agente Inversor IA (Fase 2) */}
+      {/* Panel Flotante y Drawer Global del Agente Inversor IA (Fase 2 & Fase 3) */}
       <GlobalAIAgentDrawer
         isOpen={isAgentDrawerOpen}
         onClose={() => setIsAgentDrawerOpen(false)}
@@ -357,6 +369,10 @@ export function App() {
         onSelectStock={handleSelectStock}
         onNavigateTab={(tab: string) => setCurrentTab(tab as MainTabType)}
         externalPromptTrigger={agentExternalTrigger}
+        onApplyScreenerFilters={(filters) => {
+          setExternalScreenerFilters({ filters, timestamp: Date.now() });
+          toast.success('Filtros del Agente Inversor IA sincronizados en el Screener Acciones');
+        }}
       />
 
       {/* Footer Institucional */}

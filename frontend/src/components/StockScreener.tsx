@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Download, 
   Search, 
@@ -8,6 +8,7 @@ import {
   ShieldCheck, 
   Layers,
   Sparkles,
+  Bot,
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
@@ -16,7 +17,10 @@ import {
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
+import { toast } from 'sonner';
 import type { StockRecord } from '../types/stock';
+import type { ScreenerUIFilterPayload } from '../types/agent';
+import { parseNaturalLanguageToScreenerFilters } from '../services/agentRagService';
 import { calculateFactorGrades } from '../utils/quantRatings';
 import { formatCurrencyUSD, formatPercentage, formatVolumeShares } from '../utils/formatters';
 
@@ -24,6 +28,8 @@ interface StockScreenerProps {
   stocks: StockRecord[];
   onSelectStock: (stock: StockRecord) => void;
   selectedStock?: StockRecord | null;
+  externalAIFilters?: { filters: ScreenerUIFilterPayload; timestamp: number } | null;
+  onOpenAgentDrawerWithQuery?: (query: string) => void;
 }
 
 export type SortField = keyof StockRecord | 'quant_rating';
@@ -33,8 +39,13 @@ type TableView = 'custom' | 'overview' | 'valuation' | 'financial' | 'performanc
 export const StockScreener: React.FC<StockScreenerProps> = ({
   stocks,
   onSelectStock,
-  selectedStock
+  selectedStock,
+  externalAIFilters,
+  onOpenAgentDrawerWithQuery
 }) => {
+  // Consulta en lenguaje natural dentro del Screener (Fase 3)
+  const [nlQuery, setNlQuery] = useState('');
+  const [appliedAISummary, setAppliedAISummary] = useState<string | null>(null);
   // Pestaña de filtros activa y vista de tabla (Custom por defecto según especificación)
   const [activeCategory, setActiveCategory] = useState<FilterCategory>('fundamental');
   const [tableView, setTableView] = useState<TableView>('custom');
@@ -164,8 +175,61 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
     setSma50Filter('Any');
     setSma200Filter('Any');
     setChangePctFilter('Any');
+    setAppliedAISummary(null);
     setPage(1);
   };
+
+  // Fase 3: Aplicar payload de filtros generado por Lenguaje Natural IA
+  const applyAIFilterPayload = (payload: ScreenerUIFilterPayload) => {
+    // Primero limpiar filtros previos
+    setPresetFilter('ALL');
+    setSectorFilter(payload.sectorFilter || 'Any');
+    setIndustryFilter('Any');
+    setCountryFilter('Any');
+    setMarketCapFilter(payload.marketCapFilter || 'Any');
+    setIndexFilter('Any');
+    setPeFilter(payload.peFilter || 'Any');
+    setForwardPeFilter(payload.forwardPeFilter || 'Any');
+    setPegFilter(payload.pegFilter || 'Any');
+    setPsFilter('Any');
+    setEpsGrowthQtrFilter(payload.epsGrowthQtrFilter || 'Any');
+    setEpsGrowthTtmFilter('Any');
+    setSalesGrowthQtrFilter('Any');
+    setSalesGrowthTtmFilter(payload.salesGrowthTtmFilter || 'Any');
+    setCurrentRatioFilter(payload.currentRatioFilter || 'Any');
+    setQuickRatioFilter('Any');
+    setDebtEquityFilter(payload.debtEquityFilter || 'Any');
+    setProfitMarginFilter(payload.profitMarginFilter || 'Any');
+    setRoicFilter(payload.roicFilter || 'Any');
+    setRsiFilter(payload.rsiFilter || 'Any');
+    setSma20Filter('Any');
+    setSma50Filter(payload.sma50Filter || 'Any');
+    setSma200Filter(payload.sma200Filter || 'Any');
+    setChangePctFilter('Any');
+    if (payload.tickerQuery !== undefined) {
+      setTickerQuery(payload.tickerQuery);
+    }
+    setActiveCategory('all');
+    setAppliedAISummary(payload.summaryText || 'Filtros cuantitativos aplicados por IA');
+    setPage(1);
+  };
+
+  const handleApplyNaturalLanguage = (customText?: string) => {
+    const query = (customText ?? nlQuery).trim();
+    if (!query) return;
+    if (customText) setNlQuery(customText);
+    const parsed = parseNaturalLanguageToScreenerFilters(query);
+    applyAIFilterPayload(parsed);
+    toast.success(`Filtro IA aplicado: ${parsed.summaryText}`);
+  };
+
+  // Escuchar filtros enviados desde el Drawer del Agente Inversor IA
+  useEffect(() => {
+    if (externalAIFilters && externalAIFilters.filters) {
+      applyAIFilterPayload(externalAIFilters.filters);
+      toast.success(`Screener sincronizado desde el Agente IA: ${externalAIFilters.filters.summaryText || ''}`);
+    }
+  }, [externalAIFilters?.timestamp]);
 
   // Motor de Filtrado y Ordenación
   const filteredStocks = useMemo(() => {
@@ -546,6 +610,145 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
               Limpiar Tickers
             </button>
           )}
+        </div>
+
+        {/* Fase 3: Barra de Filtrado por Lenguaje Natural con IA */}
+        <div
+          style={{
+            marginTop: '10px',
+            padding: '10px 14px',
+            background: 'linear-gradient(90deg, rgba(16, 185, 129, 0.08) 0%, rgba(6, 182, 212, 0.08) 100%)',
+            border: '1px solid rgba(16, 185, 129, 0.28)',
+            borderRadius: '8px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <span
+              style={{
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                color: '#34d399',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <Sparkles size={14} color="#34d399" />
+              Filtro Lenguaje Natural IA:
+            </span>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleApplyNaturalLanguage();
+              }}
+              style={{ flex: 1, minWidth: '280px', display: 'flex', gap: '8px' }}
+            >
+              <input
+                type="text"
+                placeholder="Ej: Empresas tecnológicas con ROIC > 15%, margen > 20% y baja deuda..."
+                value={nlQuery}
+                onChange={(e) => setNlQuery(e.target.value)}
+                style={{
+                  flex: 1,
+                  background: '#040711',
+                  border: '1px solid rgba(52, 211, 153, 0.35)',
+                  borderRadius: '6px',
+                  padding: '6px 12px',
+                  color: '#fff',
+                  fontSize: '0.8rem',
+                }}
+              />
+              <button
+                type="submit"
+                className="btn"
+                style={{
+                  padding: '6px 14px',
+                  fontSize: '0.76rem',
+                  fontWeight: 800,
+                  background: 'linear-gradient(135deg, #059669 0%, #0284c7 100%)',
+                  color: '#fff',
+                  border: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Aplicar Filtro IA
+              </button>
+              {onOpenAgentDrawerWithQuery && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onOpenAgentDrawerWithQuery(
+                      nlQuery.trim() ||
+                        'Busca las mejores acciones del mercado con ROIC > 20%, margen neto alto y deuda controlada.'
+                    )
+                  }
+                  className="btn btn-secondary"
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title="Analizar los resultados en el panel del Agente Inversor IA"
+                >
+                  <Bot size={13} color="#38bdf8" />
+                  Consultar Agente IA
+                </button>
+              )}
+            </form>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 600 }}>Ejemplos rápidos:</span>
+              {[
+                'Tecnológicas con ROIC > 15%, margen > 20% y baja deuda',
+                'Acciones infravaloradas con PEG < 1 y alto ROIC',
+                'Financieras grandes con margen > 20% y tendencia sobre SMA 50',
+                'Salud con ROIC > 15% y buena liquidez',
+              ].map((example, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => handleApplyNaturalLanguage(example)}
+                  style={{
+                    background: 'rgba(15, 23, 42, 0.85)',
+                    border: '1px solid rgba(148, 163, 184, 0.2)',
+                    borderRadius: '999px',
+                    padding: '2px 9px',
+                    fontSize: '0.68rem',
+                    color: '#cbd5e1',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
+
+            {appliedAISummary && (
+              <div
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  color: '#34d399',
+                  background: 'rgba(16, 185, 129, 0.14)',
+                  border: '1px solid rgba(16, 185, 129, 0.35)',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                }}
+              >
+                ✓ Activo: {appliedAISummary}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Presets Rápidos de Estrategia Institucional */}

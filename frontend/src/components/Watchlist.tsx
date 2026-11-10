@@ -62,6 +62,7 @@ interface WatchlistProps {
   onToggleWatchlist: (ticker: string) => void;
   onSelectStock: (stock: StockRecord) => void;
   onGoToScreener: () => void;
+  onAuditPortfolioWithAI?: () => void;
 }
 
 type PnlTimeframe = '1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | '2Y' | 'ALL';
@@ -84,7 +85,8 @@ export const Watchlist: React.FC<WatchlistProps> = ({
   watchlist,
   onToggleWatchlist,
   onSelectStock,
-  onGoToScreener
+  onGoToScreener,
+  onAuditPortfolioWithAI
 }) => {
   // Modal de Añadir Posición
   const [showAddModal, setShowAddModal] = useState(false);
@@ -549,6 +551,24 @@ export const Watchlist: React.FC<WatchlistProps> = ({
         </div>
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          {onAuditPortfolioWithAI && (
+            <button
+              onClick={onAuditPortfolioWithAI}
+              className="btn"
+              style={{
+                padding: '8px 14px',
+                fontSize: '0.85rem',
+                fontWeight: 800,
+                background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%)',
+                border: '1px solid rgba(16, 185, 129, 0.45)',
+                color: '#34d399',
+              }}
+              title="Auditar exposición, liquidez y riesgo de tu cartera en el Agente Inversor IA"
+            >
+              🤖 Auditar Cartera con IA
+            </button>
+          )}
+
           <button 
             onClick={onGoToScreener} 
             className="btn btn-secondary"

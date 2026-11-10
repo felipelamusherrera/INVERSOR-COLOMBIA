@@ -32,6 +32,7 @@ import { TradingViewChart } from './TradingViewChart';
 import { CandlestickChart } from './CandlestickChart';
 import { SectorNewsRadar } from './SectorNewsRadar';
 import { StockAIAnalysisPanel } from './StockAIAnalysisPanel';
+import { computeTechnicalSetup } from '../services/agentRagService';
 
 export interface PricePoint {
   date: string;
@@ -444,6 +445,20 @@ export const StockDetail: React.FC<StockDetailProps> = ({
   const [timeframe, setTimeframe] = useState<'1M' | '6M' | '1Y' | '3Y'>('1Y');
   const [rawPoints, setRawPoints] = useState<PricePoint[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [showChartAIScan, setShowChartAIScan] = useState(false);
+
+  // Fase 3: Cálculo técnico en vivo sobre la serie de velas de los últimos 6 meses (126 sesiones OHLCV)
+  const sixMonthTechnicalSetup = useMemo(() => {
+    const mappedCandles = rawPoints.slice(-130).map((p) => ({
+      price_date: p.date,
+      open_price: p.open ?? p.price ?? stock.price ?? 100,
+      high_price: p.high ?? p.price ?? stock.price ?? 100,
+      low_price: p.low ?? p.price ?? stock.price ?? 100,
+      close_price: p.close ?? p.price ?? stock.price ?? 100,
+      volume: p.volume,
+    }));
+    return computeTechnicalSetup(stock, mappedCandles);
+  }, [stock, rawPoints]);
 
   // Estados de Alertas de Cruce de Precio
   const [alerts, setAlerts] = useState<PriceAlert[]>(() => {
@@ -994,31 +1009,26 @@ export const StockDetail: React.FC<StockDetailProps> = ({
 
             {/* Botón Analizar Gráfico con IA & Alertas de Cruce */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              {onTriggerAgentPrompt && (
-                <button
-                  className="btn"
-                  style={{
-                    padding: '5px 12px',
-                    fontSize: '0.8rem',
-                    fontWeight: 700,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%)',
-                    border: '1px solid rgba(16, 185, 129, 0.45)',
-                    color: '#34d399',
-                  }}
-                  onClick={() =>
-                    onTriggerAgentPrompt(
-                      `Analiza la estructura técnica del gráfico de ${stock.ticker}: medias móviles reales SMA 50 y SMA 200, distancia a máximo histórico (ATH), RSI, RVol y define Zona de Entrada, Stop Loss y Targets con Trailing Breakeven.`,
-                      'technical_chart'
-                    )
-                  }
-                  title={`Ejecutar lectura técnica de ${stock.ticker} en el Agente Inversor IA`}
-                >
-                  ⚡ Analizar Gráfico con IA
-                </button>
-              )}
+              <button
+                className="btn"
+                style={{
+                  padding: '5px 12px',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: showChartAIScan
+                    ? 'linear-gradient(135deg, #059669 0%, #0284c7 100%)'
+                    : 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%)',
+                  border: '1px solid rgba(16, 185, 129, 0.45)',
+                  color: showChartAIScan ? '#ffffff' : '#34d399',
+                }}
+                onClick={() => setShowChartAIScan((prev) => !prev)}
+                title={`Escaneo técnico de serie de velas de 6 meses de ${stock.ticker}`}
+              >
+                ⚡ {showChartAIScan ? 'Ocultar Escaneo Técnico IA' : 'Analizar Gráfico con IA'}
+              </button>
 
               <button
                 className="btn btn-secondary"
@@ -1038,6 +1048,130 @@ export const StockDetail: React.FC<StockDetailProps> = ({
               </button>
             </div>
           </div>
+
+          {/* FASE 3: TARJETA INTERACTIVA DE ESCANEO TÉCNICO DE VELAS (6 MESES OHLCV) */}
+          {showChartAIScan && (
+            <div
+              style={{
+                marginBottom: '18px',
+                padding: '16px 20px',
+                borderRadius: '12px',
+                background: 'linear-gradient(135deg, rgba(6, 78, 59, 0.25) 0%, rgba(15, 23, 42, 0.95) 100%)',
+                border: '1px solid rgba(16, 185, 129, 0.4)',
+                boxShadow: '0 8px 25px rgba(0, 0, 0, 0.35)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                  marginBottom: '12px',
+                  paddingBottom: '10px',
+                  borderBottom: '1px solid rgba(148, 163, 184, 0.16)',
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#fff' }}>
+                      ⚡ Diagnóstico Técnico Automatizado de Velas ({sixMonthTechnicalSetup.candlesAnalyzedCount} Sesiones / 6 Meses)
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 800,
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        background: 'rgba(16, 185, 129, 0.2)',
+                        color: '#34d399',
+                        border: '1px solid rgba(16, 185, 129, 0.4)',
+                      }}
+                    >
+                      {sixMonthTechnicalSetup.trendStatus}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#38bdf8', fontWeight: 700, marginTop: '4px' }}>
+                    Patrón Detectado: {sixMonthTechnicalSetup.detectedChartPattern}
+                  </div>
+                </div>
+
+                {onTriggerAgentPrompt && (
+                  <button
+                    onClick={() =>
+                      onTriggerAgentPrompt(
+                        `Analiza la estructura técnica del gráfico de ${stock.ticker}: medias móviles reales SMA 50 y SMA 200, pivotes de 20 sesiones, distancia a ATH, RSI, RVol y define Zona de Entrada, Stop Loss y Targets con Trailing Breakeven.`,
+                        'technical_chart'
+                      )
+                    }
+                    className="btn"
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      background: 'linear-gradient(135deg, #059669 0%, #0284c7 100%)',
+                      color: '#fff',
+                      border: 'none',
+                    }}
+                  >
+                    Abrir Análisis Completo en Agente IA →
+                  </button>
+                )}
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                  gap: '10px',
+                  marginBottom: '12px',
+                }}
+              >
+                <div style={{ background: 'rgba(7, 11, 20, 0.75)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ fontSize: '0.68rem', color: '#94a3b8' }}>SOPORTE PIVOTE 20D</div>
+                  <div className="font-mono" style={{ fontSize: '1rem', fontWeight: 800, color: '#38bdf8', marginTop: '2px' }}>
+                    ${sixMonthTechnicalSetup.support20D.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: '0.66rem', color: '#64748b' }}>Mínimo 6M: ${sixMonthTechnicalSetup.sixMonthLow.toFixed(2)}</div>
+                </div>
+
+                <div style={{ background: 'rgba(7, 11, 20, 0.75)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ fontSize: '0.68rem', color: '#94a3b8' }}>RESISTENCIA PIVOTE 20D</div>
+                  <div className="font-mono" style={{ fontSize: '1rem', fontWeight: 800, color: '#f59e0b', marginTop: '2px' }}>
+                    ${sixMonthTechnicalSetup.resistance20D.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: '0.66rem', color: '#64748b' }}>Máximo 6M: ${sixMonthTechnicalSetup.sixMonthHigh.toFixed(2)}</div>
+                </div>
+
+                <div style={{ background: 'rgba(7, 11, 20, 0.75)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ fontSize: '0.68rem', color: '#94a3b8' }}>SMA 50 / SMA 200 REAL</div>
+                  <div className="font-mono" style={{ fontSize: '0.92rem', fontWeight: 800, color: '#e2e8f0', marginTop: '2px' }}>
+                    ${sixMonthTechnicalSetup.sma50Real.toFixed(2)} / ${sixMonthTechnicalSetup.sma200Real.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: '0.66rem', color: '#64748b' }}>ATR(14): ${sixMonthTechnicalSetup.realAtr14.toFixed(2)} USD</div>
+                </div>
+
+                <div style={{ background: 'rgba(7, 11, 20, 0.75)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
+                  <div style={{ fontSize: '0.68rem', color: '#34d399', fontWeight: 700 }}>ENTRADA / STOP LOSS</div>
+                  <div className="font-mono" style={{ fontSize: '0.92rem', fontWeight: 800, color: '#fff', marginTop: '2px' }}>
+                    ${sixMonthTechnicalSetup.entryZone.toFixed(2)} / <span style={{ color: '#f87171' }}>${sixMonthTechnicalSetup.stopLoss.toFixed(2)}</span>
+                  </div>
+                  <div style={{ fontSize: '0.66rem', color: '#94a3b8' }}>Riesgo: {sixMonthTechnicalSetup.stopLossPct}%</div>
+                </div>
+
+                <div style={{ background: 'rgba(7, 11, 20, 0.75)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.35)' }}>
+                  <div style={{ fontSize: '0.68rem', color: '#34d399', fontWeight: 700 }}>TARGET 1 (BREAKEVEN) / T2</div>
+                  <div className="font-mono" style={{ fontSize: '0.92rem', fontWeight: 800, color: '#34d399', marginTop: '2px' }}>
+                    ${sixMonthTechnicalSetup.target1TrailingBreakeven.toFixed(2)} / ${sixMonthTechnicalSetup.target2Intrinsic.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: '0.66rem', color: '#94a3b8' }}>
+                    Ratio R:R a T2: {sixMonthTechnicalSetup.riskRewardT2}:1
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* VISTA A: TradingView Pro Oficial con Altura Generosa de 640px */}
           {terminalMode === 'tradingview' && (
