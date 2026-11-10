@@ -713,7 +713,7 @@ ${tableRows}
 
   // Si no hay acción primaria identificada para las demás intenciones
   if (!s) {
-    return `### 🤖 Agente Cuantitativo InversorAI\n\nHe procesado tu consulta (*"${userMessage}"*), pero no detecté un ticker específico seleccionado.\n\n**Puedes preguntarme directamente por cualquier acción o comando:**\n* *"Analiza a fondo NVDA y su estructura de entrada"*\n* *"Compara MA vs V por múltiplos de valoración y ROIC"*\n* *"Busca empresas tecnológicas con ROIC > 20% y baja deuda"*\n* *"Audita el riesgo actual de mi cartera"*`;
+    return `### 🤖 Agente Inversor IA — Inteligencia Cuantitativa\n\nHe procesado tu consulta (*"${userMessage}"*), pero no detecté un ticker específico seleccionado.\n\n**Puedes preguntarme directamente por cualquier acción o comando:**\n* *"Analiza a fondo NVDA y su estructura de entrada"*\n* *"Compara MA vs V por múltiplos de valoración y ROIC"*\n* *"Busca empresas tecnológicas con ROIC > 20% y baja deuda"*\n* *"Audita el riesgo actual de mi cartera"*`;
   }
 
   const mcapFormatted = formatCurrencyUSD(normalizeToAbsoluteUSD(s.market_cap));
@@ -848,7 +848,7 @@ ${
 * Con participación institucional del **${s.inst_own ?? 78.5}%** y un flujo de caja libre de **${fcfFormatted}**, la compañía cuenta con holgura financiera para sostener programas de recompra de acciones y amortización de pasivos sin riesgo de dilución accionaria.`;
   }
 
-  // Caso F (Por defecto): Diagnóstico Integral de la Acción (Estilo WarrenAI Executive Brief)
+  // Caso F (Por defecto): Diagnóstico Integral de la Acción (Informe Ejecutivo Institucional)
   return `### 🏛️ Diagnóstico Institucional Completo: **${s.ticker} — ${s.company}**
 
 **Resumen Ejecutivo (${s.sector} · ${s.industry}):**

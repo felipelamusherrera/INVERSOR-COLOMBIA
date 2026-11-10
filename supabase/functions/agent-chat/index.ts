@@ -1,7 +1,7 @@
 // ============================================================================
 // Supabase Edge Function: agent-chat
 // Fase 1: Backend Seguro & Motor RAG Financiero (Costo $0 - Google AI Studio)
-// Aplicativo: Inversor Colombia (Estilo WarrenAI Institucional)
+// Aplicativo: Inversor Colombia — Agente Inversor IA
 // ============================================================================
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
@@ -79,7 +79,7 @@ DATOS VERIFICADOS EN SUPABASE PARA ${s.ticker} (${s.company}):
       );
     }
 
-    const systemInstruction = `Eres "InversorAI", el Agente Analista Cuantitativo e Institucional de la plataforma "Inversor Colombia" (equivalente avanzado a WarrenAI de InvestingPro).
+    const systemInstruction = `Eres el "Agente Inversor IA", el Analista Cuantitativo e Institucional nativo de la plataforma "Inversor Colombia".
 REGLAS ESTRICTAS DE AUDITORÍA Y PRECISIÓN:
 1. NUNCA inventes ni alucines cifras financieras. Utiliza EXCLUSIVAMENTE los datos verificados en el bloque [CONTEXTO RAG FINANCIERO EN VIVO] provisto en la consulta.
 2. Formatea las cifras monetarias grandes de forma limpia: miles de millones como "$X.XX B USD", millones como "$X.XX M USD" y billones (trillions) como "$X.XX T USD". Jamás concatene números crudos largos con letras (ej. prohibido escribir "$14414300000M USD").

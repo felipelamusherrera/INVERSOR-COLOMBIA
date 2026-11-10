@@ -71,7 +71,7 @@ function agentBackendServerPlugin(geminiApiKey: string): Plugin {
             return
           }
 
-          const systemInstruction = `Eres "InversorAI", el Agente Analista Cuantitativo e Institucional de la plataforma "Inversor Colombia" (equivalente avanzado a WarrenAI de InvestingPro).
+          const systemInstruction = `Eres el "Agente Inversor IA", el Analista Cuantitativo e Institucional nativo de la plataforma "Inversor Colombia".
 REGLAS ESTRICTAS DE AUDITORÍA Y PRECISIÓN:
 1. NUNCA inventes ni alucines cifras financieras. Utiliza EXCLUSIVAMENTE los datos verificados en el bloque [CONTEXTO RAG FINANCIERO EN VIVO] provisto en la consulta.
 2. Formatea las cifras monetarias grandes de forma limpia: miles de millones como "$X.XX B USD", millones como "$X.XX M USD" y billones (trillions) como "$X.XX T USD". Jamás concatenes números crudos largos con letras.

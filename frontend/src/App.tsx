@@ -10,6 +10,8 @@ import { PeersComparison } from './components/PeersComparison';
 import { Watchlist } from './components/Watchlist';
 import { FinvizMap } from './components/FinvizMap';
 import { StrategyAIModule } from './components/StrategyAIModule';
+import { GlobalAIAgentDrawer } from './components/GlobalAIAgentDrawer';
+import type { AgentIntentType } from './types/agent';
 import { Toaster, toast } from 'sonner';
 import { AlertCircle, RefreshCw, Database, ShieldCheck } from 'lucide-react';
 
@@ -33,6 +35,23 @@ export function App() {
   // Sistema de Pestañas Múltiples de Acciones (No cierra la ventana de la acción anterior)
   const [openStockTabs, setOpenStockTabs] = useState<string[]>(['MU']);
   const [activeStockTicker, setActiveStockTicker] = useState<string | null>('MU');
+
+  // Estado del Drawer Flotante Global del Agente Inversor IA (Fase 2)
+  const [isAgentDrawerOpen, setIsAgentDrawerOpen] = useState(false);
+  const [agentExternalTrigger, setAgentExternalTrigger] = useState<{
+    prompt: string;
+    intent?: AgentIntentType;
+    timestamp: number;
+  } | null>(null);
+
+  const handleTriggerAgentPrompt = (prompt: string, intent?: AgentIntentType) => {
+    setIsAgentDrawerOpen(true);
+    setAgentExternalTrigger({
+      prompt,
+      intent,
+      timestamp: Date.now(),
+    });
+  };
 
   // Watchlist persistida en localStorage
   const [watchlist, setWatchlist] = useState<string[]>(() => {
@@ -194,6 +213,8 @@ export function App() {
         onSwitchStockTab={handleSwitchStockTab}
         onCloseStockTab={handleCloseStockTab}
         lastUpdatedDate={snapshotDate}
+        onToggleAgentDrawer={() => setIsAgentDrawerOpen(prev => !prev)}
+        isAgentDrawerOpen={isAgentDrawerOpen}
       />
 
       {/* Contenido Principal */}
@@ -296,6 +317,7 @@ export function App() {
                 onToggleWatchlist={handleToggleWatchlist}
                 isWatchlisted={watchlist.includes(currentActiveStock.ticker)}
                 allStocks={stocks}
+                onTriggerAgentPrompt={handleTriggerAgentPrompt}
               />
             )}
 
@@ -323,6 +345,19 @@ export function App() {
           </>
         )}
       </main>
+
+      {/* Panel Flotante y Drawer Global del Agente Inversor IA (Fase 2) */}
+      <GlobalAIAgentDrawer
+        isOpen={isAgentDrawerOpen}
+        onClose={() => setIsAgentDrawerOpen(false)}
+        onOpen={() => setIsAgentDrawerOpen(true)}
+        stocks={stocks}
+        activeStock={currentActiveStock}
+        currentTab={currentTab}
+        onSelectStock={handleSelectStock}
+        onNavigateTab={(tab: string) => setCurrentTab(tab as MainTabType)}
+        externalPromptTrigger={agentExternalTrigger}
+      />
 
       {/* Footer Institucional */}
       <footer className="footer">

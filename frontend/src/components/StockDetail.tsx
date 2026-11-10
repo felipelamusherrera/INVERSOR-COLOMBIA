@@ -399,6 +399,10 @@ interface StockDetailProps {
   onToggleWatchlist: (ticker: string) => void;
   isWatchlisted: boolean;
   allStocks?: StockRecord[];
+  onTriggerAgentPrompt?: (
+    prompt: string,
+    intent?: 'technical_chart' | 'stock_diagnosis' | 'peer_comparison'
+  ) => void;
 }
 
 export const StockDetail: React.FC<StockDetailProps> = ({
@@ -406,7 +410,8 @@ export const StockDetail: React.FC<StockDetailProps> = ({
   onBack,
   onToggleWatchlist,
   isWatchlisted,
-  allStocks
+  allStocks,
+  onTriggerAgentPrompt
 }) => {
   const analysis = calculateFactorGrades(stock);
 
@@ -987,8 +992,34 @@ export const StockDetail: React.FC<StockDetailProps> = ({
               </div>
             </div>
 
-            {/* Botón Alertas de Cruce */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* Botón Analizar Gráfico con IA & Alertas de Cruce */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {onTriggerAgentPrompt && (
+                <button
+                  className="btn"
+                  style={{
+                    padding: '5px 12px',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%)',
+                    border: '1px solid rgba(16, 185, 129, 0.45)',
+                    color: '#34d399',
+                  }}
+                  onClick={() =>
+                    onTriggerAgentPrompt(
+                      `Analiza la estructura técnica del gráfico de ${stock.ticker}: medias móviles reales SMA 50 y SMA 200, distancia a máximo histórico (ATH), RSI, RVol y define Zona de Entrada, Stop Loss y Targets con Trailing Breakeven.`,
+                      'technical_chart'
+                    )
+                  }
+                  title={`Ejecutar lectura técnica de ${stock.ticker} en el Agente Inversor IA`}
+                >
+                  ⚡ Analizar Gráfico con IA
+                </button>
+              )}
+
               <button
                 className="btn btn-secondary"
                 style={{ 

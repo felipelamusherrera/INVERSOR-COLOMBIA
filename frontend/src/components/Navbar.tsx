@@ -10,6 +10,7 @@ import {
   ArrowRight,
   Grid,
   Bot,
+  Sparkles,
   Filter,
   X
 } from 'lucide-react';
@@ -26,6 +27,8 @@ interface NavbarProps {
   onSwitchStockTab: (ticker: string) => void;
   onCloseStockTab: (ticker: string) => void;
   lastUpdatedDate?: string | null;
+  onToggleAgentDrawer?: () => void;
+  isAgentDrawerOpen?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -38,7 +41,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeStockTicker,
   onSwitchStockTab,
   onCloseStockTab,
-  lastUpdatedDate
+  lastUpdatedDate,
+  onToggleAgentDrawer,
+  isAgentDrawerOpen
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
@@ -298,6 +303,32 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Bookmark size={14} />
             Mi Cartera
           </button>
+
+          {onToggleAgentDrawer && (
+            <button
+              id="nav-btn-agent-drawer"
+              onClick={onToggleAgentDrawer}
+              className="btn"
+              style={{
+                padding: '6px 12px',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                background: isAgentDrawerOpen
+                  ? 'linear-gradient(135deg, #059669 0%, #0284c7 100%)'
+                  : 'rgba(16, 185, 129, 0.14)',
+                border: '1px solid rgba(16, 185, 129, 0.4)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                marginLeft: '4px',
+              }}
+              title="Abrir panel del Agente Inversor IA"
+            >
+              <Sparkles size={14} color="#34d399" />
+              Agente IA
+            </button>
+          )}
         </nav>
 
         {/* Estado de Mercado Wall Street */}
