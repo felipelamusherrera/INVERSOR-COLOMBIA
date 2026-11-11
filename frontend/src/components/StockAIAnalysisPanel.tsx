@@ -19,7 +19,9 @@ import {
   Users,
   Compass,
   Award,
-  RefreshCw
+  RefreshCw,
+  Bookmark,
+  Briefcase
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -35,6 +37,8 @@ import {
 import { toast } from 'sonner';
 import type { StockRecord } from '../types/stock';
 import { formatCurrencyUSD, formatPercentage, calculateRealSMA, calculateNextEarningsDate } from '../utils/formatters';
+import { AddPositionModal } from './AddPositionModal';
+import { AddToWatchlistModal } from './AddToWatchlistModal';
 
 interface StockAIAnalysisPanelProps {
   stock: StockRecord;
@@ -50,6 +54,8 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
 
   // Estado para regeneración de auditoría institucional
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showAddPositionModal, setShowAddPositionModal] = useState(false);
+  const [showAddToWatchlistModal, setShowAddToWatchlistModal] = useState(false);
 
   // Mapear ETF Sectorial correspondiente
   const sectorEtf = useMemo(() => {
@@ -413,6 +419,31 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
             >
               <RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} />
               Regenerar Auditoría IA
+            </button>
+
+            <button
+              onClick={() => setShowAddToWatchlistModal(true)}
+              className="btn btn-secondary"
+              title="Organizar en listas de seguimiento personalizadas"
+              style={{ padding: '7px 12px', fontSize: '0.80rem', gap: '6px' }}
+            >
+              <Bookmark size={13} /> Lista Seguimiento
+            </button>
+
+            <button
+              onClick={() => setShowAddPositionModal(true)}
+              className="btn btn-primary"
+              title="Registrar posición oficial en Mi Cartera"
+              style={{
+                padding: '7px 13px',
+                fontSize: '0.80rem',
+                fontWeight: 800,
+                gap: '6px',
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                boxShadow: '0 4px 14px rgba(16, 185, 129, 0.25)',
+              }}
+            >
+              <Briefcase size={13} /> Agregar a Cartera
             </button>
 
             <button
@@ -1542,6 +1573,20 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
           <span style={{ color: 'var(--accent-green)', fontWeight: 700 }}>AUDIT APPROVED · 100% INMERSO EN PLATAFORMA</span>
         </div>
       </div>
+
+      {/* Modal para Agregar Posición Real a Mi Cartera */}
+      <AddPositionModal
+        isOpen={showAddPositionModal}
+        onClose={() => setShowAddPositionModal(false)}
+        stock={stock}
+      />
+
+      {/* Modal para Agregar a Listas de Seguimiento */}
+      <AddToWatchlistModal
+        isOpen={showAddToWatchlistModal}
+        onClose={() => setShowAddToWatchlistModal(false)}
+        stock={stock}
+      />
 
     </div>
   );

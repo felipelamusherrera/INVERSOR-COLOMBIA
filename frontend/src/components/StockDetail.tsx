@@ -9,7 +9,8 @@ import {
   Bell,
   BellRing,
   Trash2,
-  X
+  X,
+  Briefcase
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -34,6 +35,8 @@ import { SectorNewsRadar } from './SectorNewsRadar';
 import { StockAIAnalysisPanel } from './StockAIAnalysisPanel';
 import { computeTechnicalSetup } from '../services/agentRagService';
 import { calculateNextEarningsDate } from '../utils/formatters';
+import { AddPositionModal } from './AddPositionModal';
+import { AddToWatchlistModal } from './AddToWatchlistModal';
 
 export interface PricePoint {
   date: string;
@@ -479,6 +482,8 @@ export const StockDetail: React.FC<StockDetailProps> = ({
   const [rawPoints, setRawPoints] = useState<PricePoint[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [showChartAIScan, setShowChartAIScan] = useState(false);
+  const [showAddPositionModal, setShowAddPositionModal] = useState(false);
+  const [showAddToWatchlistModal, setShowAddToWatchlistModal] = useState(false);
 
   // Fase 3: Cálculo técnico en vivo sobre la serie de velas de los últimos 6 meses (126 sesiones OHLCV)
   const sixMonthTechnicalSetup = useMemo(() => {
@@ -809,14 +814,32 @@ export const StockDetail: React.FC<StockDetailProps> = ({
           <ArrowLeft size={16} /> Volver al Screener
         </button>
 
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button 
-            id="btn-toggle-watchlist"
-            className={`btn ${isWatchlisted ? 'btn-active' : 'btn-secondary'}`}
-            onClick={() => onToggleWatchlist(stock.ticker)}
+            className="btn btn-secondary"
+            onClick={() => setShowAddToWatchlistModal(true)}
+            style={{ gap: '6px', fontSize: '0.82rem', fontWeight: 700 }}
+            title="Organizar en Listas de Seguimiento Personalizadas"
           >
-            <Bookmark size={16} fill={isWatchlisted ? 'var(--accent-green)' : 'none'} />
-            {isWatchlisted ? 'En Mi Cartera' : 'Agregar a Mi Cartera'}
+            <Bookmark size={15} fill={isWatchlisted ? 'var(--accent-cyan)' : 'none'} color={isWatchlisted ? 'var(--accent-cyan)' : 'currentColor'} />
+            Listas de Seguimiento
+          </button>
+
+          <button 
+            id="btn-add-to-portfolio"
+            className="btn btn-primary"
+            onClick={() => setShowAddPositionModal(true)}
+            style={{ 
+              gap: '6px', 
+              fontSize: '0.82rem', 
+              fontWeight: 800,
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              boxShadow: '0 4px 14px rgba(16, 185, 129, 0.25)'
+            }}
+            title="Abrir formulario oficial de registro para Mi Cartera"
+          >
+            <Briefcase size={15} />
+            Agregar a Mi Cartera
           </button>
         </div>
       </div>
@@ -2161,6 +2184,21 @@ export const StockDetail: React.FC<StockDetailProps> = ({
           industry={stock.industry} 
         />
       </div>
+
+      {/* Modal para Agregar Posición Real a Mi Cartera */}
+      <AddPositionModal
+        isOpen={showAddPositionModal}
+        onClose={() => setShowAddPositionModal(false)}
+        stock={stock}
+      />
+
+      {/* Modal para Agregar a Listas de Seguimiento */}
+      <AddToWatchlistModal
+        isOpen={showAddToWatchlistModal}
+        onClose={() => setShowAddToWatchlistModal(false)}
+        stock={stock}
+        onSuccess={() => onToggleWatchlist(stock.ticker)}
+      />
     </div>
   );
 };

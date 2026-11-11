@@ -15,7 +15,10 @@ import {
   RotateCcw,
   SlidersHorizontal,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Briefcase,
+  Bookmark,
+  ExternalLink
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { StockRecord } from '../types/stock';
@@ -23,6 +26,8 @@ import type { ScreenerUIFilterPayload } from '../types/agent';
 import { parseNaturalLanguageToScreenerFilters } from '../services/agentRagService';
 import { calculateFactorGrades } from '../utils/quantRatings';
 import { formatCurrencyUSD, formatPercentage, formatVolumeShares } from '../utils/formatters';
+import { AddPositionModal } from './AddPositionModal';
+import { AddToWatchlistModal } from './AddToWatchlistModal';
 
 interface StockScreenerProps {
   stocks: StockRecord[];
@@ -49,6 +54,22 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
   // Pestaña de filtros activa y vista de tabla (Custom por defecto según especificación)
   const [activeCategory, setActiveCategory] = useState<FilterCategory>('fundamental');
   const [tableView, setTableView] = useState<TableView>('custom');
+
+  // Menú contextual en clic derecho y modales de Cartera y Listas
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    stock: StockRecord;
+  } | null>(null);
+  const [modalStock, setModalStock] = useState<StockRecord | null>(null);
+  const [showAddPositionModal, setShowAddPositionModal] = useState(false);
+  const [showAddToWatchlistModal, setShowAddToWatchlistModal] = useState(false);
+
+  useEffect(() => {
+    const handleCloseMenu = () => setContextMenu(null);
+    window.addEventListener('click', handleCloseMenu);
+    return () => window.removeEventListener('click', handleCloseMenu);
+  }, []);
 
   // Filtro por lista de tickers separados por coma (ej: SNDK, MU, ASMI, NBIS...)
   const [tickerQuery, setTickerQuery] = useState('');
@@ -1312,6 +1333,13 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                   }}
                   className="data-row-hover"
                   onClick={() => onSelectStock(stock)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const x = Math.min(e.clientX, window.innerWidth - 240);
+                    const y = Math.min(e.clientY, window.innerHeight - 200);
+                    setContextMenu({ x, y, stock });
+                  }}
                 >
                   
                   {/* FILAS DE VISTA CUSTOM (28 COLUMNAS EXACTAS) */}
@@ -1667,6 +1695,143 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Menú Contextual Flotante de Clic Derecho */}
+      {contextMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            top: contextMenu.y,
+            left: contextMenu.x,
+            zIndex: 9999,
+            background: 'rgba(11, 19, 32, 0.98)',
+            backdropFilter: 'blur(16px)',
+            border: '1px solid rgba(56, 189, 248, 0.35)',
+            borderRadius: '10px',
+            boxShadow: '0 16px 36px rgba(0, 0, 0, 0.75)',
+            minWidth: '230px',
+            padding: '6px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', marginBottom: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span className="font-mono" style={{ fontWeight: 900, color: 'var(--accent-cyan)', fontSize: '0.90rem' }}>
+                {contextMenu.stock.ticker}
+              </span>
+              <span className="font-mono" style={{ fontSize: '0.80rem', color: '#fff', fontWeight: 700 }}>
+                ${(contextMenu.stock.price || 0).toFixed(2)}
+              </span>
+            </div>
+            <span style={{ fontSize: '0.70rem', color: 'var(--text-muted)', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {contextMenu.stock.company}
+            </span>
+          </div>
+
+          <button
+            onClick={() => {
+              setModalStock(contextMenu.stock);
+              setShowAddPositionModal(true);
+              setContextMenu(null);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 10px',
+              borderRadius: '6px',
+              border: 'none',
+              background: 'transparent',
+              color: '#fff',
+              fontSize: '0.80rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              textAlign: 'left',
+              width: '100%',
+              transition: 'background 0.15s ease',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(16, 185, 129, 0.15)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <Briefcase size={14} color="var(--accent-green)" />
+            Agregar a Mi Cartera (Long/Short)
+          </button>
+
+          <button
+            onClick={() => {
+              setModalStock(contextMenu.stock);
+              setShowAddToWatchlistModal(true);
+              setContextMenu(null);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 10px',
+              borderRadius: '6px',
+              border: 'none',
+              background: 'transparent',
+              color: '#fff',
+              fontSize: '0.80rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              textAlign: 'left',
+              width: '100%',
+              transition: 'background 0.15s ease',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(6, 182, 212, 0.15)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <Bookmark size={14} color="var(--accent-cyan)" />
+            Agregar a Lista de Seguimiento
+          </button>
+
+          <button
+            onClick={() => {
+              onSelectStock(contextMenu.stock);
+              setContextMenu(null);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 10px',
+              borderRadius: '6px',
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--text-secondary)',
+              fontSize: '0.80rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              textAlign: 'left',
+              width: '100%',
+              transition: 'background 0.15s ease',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <ExternalLink size={14} />
+            Ver Análisis Completo
+          </button>
+        </div>
+      )}
+
+      {/* Modal Registrar Posición Real en Mi Cartera */}
+      <AddPositionModal
+        isOpen={showAddPositionModal}
+        onClose={() => setShowAddPositionModal(false)}
+        stock={modalStock}
+      />
+
+      {/* Modal Agregar a Listas de Seguimiento */}
+      <AddToWatchlistModal
+        isOpen={showAddToWatchlistModal}
+        onClose={() => setShowAddToWatchlistModal(false)}
+        stock={modalStock}
+      />
 
     </div>
   );

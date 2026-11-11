@@ -632,23 +632,74 @@ export function executeNaturalLanguageScreener(
     appliedFilters.minProfitMargin = `${minPm}%`;
   }
 
-  // Si no se especificaron filtros explícitos numéricos, aplicar filtro de Calidad Institucional por defecto
-  if (Object.keys(appliedFilters).length === 0) {
-    filtered = filtered.filter(
-      (s) => (s.roic || 0) >= 15 && (s.profit_m || 0) >= 15 && (s.sales_yoy_ttm || s.sales_qq || 0) >= 10
-    );
-    appliedFilters.preset = 'Calidad Institucional (ROIC >= 15%, Margen >= 15%, Ventas YoY >= 10%)';
+  // Si se solicitan "mejores acciones", "calidad", "top" o si no hay filtros explícitos de pérdidas,
+  // descartar empresas que destruyen capital (Margen Neto <= 0% o ROIC <= 0%)
+  const isQualityIntent = q.includes('mejor') || q.includes('calidad') || q.includes('top') || q.includes('rentab') || q.includes('foso') || Object.keys(appliedFilters).length <= 1;
+  if (isQualityIntent) {
+    const qualityFiltered = filtered.filter((s) => (s.profit_m ?? 0) > 0 && (s.roic ?? 0) > 0);
+    // Solo aplicar el filtro estricto si deja al menos 4 resultados disponibles
+    if (qualityFiltered.length >= 4) {
+      filtered = qualityFiltered;
+      if (!appliedFilters.preset && Object.keys(appliedFilters).length <= 1) {
+        appliedFilters.preset = 'Calidad y Rentabilidad Positiva (ROIC > 0% & Margen Neto > 0%)';
+      }
+    }
   }
 
-  // Ordenar por calidad ponderada (evitar anomalías contables de fideicomisos/trusts con ROIC > 150%)
-  filtered.sort((a, b) => {
-    const aRoic = Math.min(a.roic || 0, 100);
-    const bRoic = Math.min(b.roic || 0, 100);
-    const aScale = (a.market_cap || 0) >= 2000 ? 1 : 0;
-    const bScale = (b.market_cap || 0) >= 2000 ? 1 : 0;
-    if (aScale !== bScale) return bScale - aScale;
-    return (bRoic * (b.profit_m || 1)) - (aRoic * (a.profit_m || 1));
-  });
+  // Función matemática de Puntuación Compuesta Multidimensional (Factor Grades Cuantitativos)
+  const computeCompositeScore = (s: StockRecord): number => {
+    const roic = s.roic ?? 0;
+    const profitM = s.profit_m ?? 0;
+    const operM = s.oper_m ?? 0;
+    const salesQq = s.sales_qq ?? s.sales_yoy_ttm ?? 0;
+    const epsQq = s.eps_qq ?? 0;
+    const debtEq = s.debt_eq ?? 1.0;
+    const currR = s.curr_r ?? 1.0;
+    const pe = s.pe ?? s.forward_pe ?? 25;
+    const peg = s.peg ?? 2.0;
+
+    // Penalización estricta para empresas con pérdidas netas o ROIC negativo
+    if (profitM <= 0 || roic <= 0) {
+      return -500 + profitM + roic;
+    }
+
+    // 1. Rentabilidad y Foso Económico (35%)
+    // Acotamos ROIC a 100% para neutralizar distorsiones de fideicomisos/trusts
+    const normRoic = Math.min(roic, 100);
+    const normProfitM = Math.min(profitM, 60);
+    const normOperM = Math.min(operM, 60);
+    const rentabilityScore = (normRoic * 0.40) + (normProfitM * 0.35) + (normOperM * 0.25);
+
+    // 2. Crecimiento Operativo y Beneficio (25%)
+    let growthScore = 0;
+    if (salesQq > 0) growthScore += Math.min(salesQq, 50) * 0.30;
+    if (epsQq > 0) growthScore += Math.min(epsQq, 50) * 0.25;
+
+    // 3. Salud Financiera y Solvencia (20%)
+    let solvencyScore = 0;
+    if (debtEq < 0.5) solvencyScore += 12;
+    else if (debtEq < 1.0) solvencyScore += 8;
+    else if (debtEq > 2.5) solvencyScore -= 10;
+
+    if (currR >= 1.5) solvencyScore += 8;
+    else if (currR >= 1.0) solvencyScore += 4;
+
+    // 4. Valoración y Múltiplos (20%)
+    let valuationScore = 0;
+    if (peg > 0 && peg <= 1.5) valuationScore += 10;
+    else if (peg > 0 && peg <= 2.5) valuationScore += 5;
+    if (pe > 0 && pe <= 30) valuationScore += 6;
+
+    // Bonificación de Liquidez Institucional (Market Cap >= $1B)
+    const rawMcap = s.market_cap || 0;
+    const mcapDollars = rawMcap > 1e6 ? rawMcap : rawMcap * 1e6;
+    const scaleBonus = mcapDollars >= 1e9 ? 6 : 0;
+
+    return rentabilityScore + growthScore + solvencyScore + valuationScore + scaleBonus;
+  };
+
+  // Ordenar de mayor a menor según el puntaje cuantitativo multicriterio
+  filtered.sort((a, b) => computeCompositeScore(b) - computeCompositeScore(a));
 
   return {
     matches: filtered.slice(0, 8),
