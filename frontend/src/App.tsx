@@ -11,6 +11,7 @@ import { Watchlist } from './components/Watchlist';
 import { FinvizMap } from './components/FinvizMap';
 import { StrategyAIModule } from './components/StrategyAIModule';
 import { GlobalAIAgentDrawer } from './components/GlobalAIAgentDrawer';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import type { AgentIntentType, ScreenerUIFilterPayload } from './types/agent';
 import { Toaster, toast } from 'sonner';
 import { AlertCircle, RefreshCw, Database, ShieldCheck } from 'lucide-react';
@@ -316,15 +317,17 @@ export function App() {
 
             {/* 6. Análisis Detallado (Multi-Pestaña) */}
             {currentTab === 'detail' && currentActiveStock && (
-              <StockDetail
-                key={currentActiveStock.ticker}
-                stock={currentActiveStock}
-                onBack={() => setCurrentTab('screener')}
-                onToggleWatchlist={handleToggleWatchlist}
-                isWatchlisted={watchlist.includes(currentActiveStock.ticker)}
-                allStocks={stocks}
-                onTriggerAgentPrompt={handleTriggerAgentPrompt}
-              />
+              <ErrorBoundary fallbackTitle={`Error al cargar el análisis de ${currentActiveStock.ticker}`} onReset={() => setCurrentTab('screener')}>
+                <StockDetail
+                  key={currentActiveStock.ticker}
+                  stock={currentActiveStock}
+                  onBack={() => setCurrentTab('screener')}
+                  onToggleWatchlist={handleToggleWatchlist}
+                  isWatchlisted={watchlist.includes(currentActiveStock.ticker)}
+                  allStocks={stocks}
+                  onTriggerAgentPrompt={handleTriggerAgentPrompt}
+                />
+              </ErrorBoundary>
             )}
 
             {/* 7. Comparador de Acciones */}

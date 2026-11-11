@@ -96,11 +96,11 @@ export function saveCustomWatchlists(lists: CustomWatchlist[]): void {
 /**
  * Crea una nueva lista de seguimiento con nombre personalizado
  */
-export function createCustomWatchlist(name: string, description?: string): CustomWatchlist {
+export function createCustomWatchlist(name: string, description?: string, customColor?: string): CustomWatchlist {
   const lists = getCustomWatchlists();
   const id = `list-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const colors = ['#06b6d4', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'];
-  const color = colors[lists.length % colors.length];
+  const color = customColor || colors[lists.length % colors.length];
 
   const newList: CustomWatchlist = {
     id,

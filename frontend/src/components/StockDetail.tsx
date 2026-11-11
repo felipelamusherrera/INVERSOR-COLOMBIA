@@ -33,6 +33,7 @@ import { TradingViewChart } from './TradingViewChart';
 import { CandlestickChart } from './CandlestickChart';
 import { SectorNewsRadar } from './SectorNewsRadar';
 import { StockAIAnalysisPanel } from './StockAIAnalysisPanel';
+import { ErrorBoundary } from './ErrorBoundary';
 import { computeTechnicalSetup } from '../services/agentRagService';
 import { calculateNextEarningsDate } from '../utils/formatters';
 import { AddPositionModal } from './AddPositionModal';
@@ -2097,7 +2098,9 @@ export const StockDetail: React.FC<StockDetailProps> = ({
       </div>
 
       {/* 4. Apartado del Agente IA de Análisis Institucional (Estrategia de Inversión) */}
-      <StockAIAnalysisPanel stock={stock} allStocks={allStocks} officialFinancials={officialFinancials} />
+      <ErrorBoundary fallbackTitle={`Error al cargar el análisis institucional de ${stock.ticker}`}>
+        <StockAIAnalysisPanel stock={stock} allStocks={allStocks} officialFinancials={officialFinancials} />
+      </ErrorBoundary>
 
       {/* 5. Radar Multimedia: Noticias Gratuitas, Comunidad en X y Videos de YouTube */}
       <div id="radar-multimedia">

@@ -966,8 +966,9 @@ export function formatSourceAuditBlock(
   snapshotDate?: string
 ): string {
   const dateStr = snapshotDate || new Date().toISOString().split('T')[0];
-  const etfTicker = benchmark?.etfTicker || SECTOR_ETF_MAP[stock.sector]?.ticker || 'SPY';
-  const etfName = benchmark?.etfName || SECTOR_ETF_MAP[stock.sector]?.name || 'SPDR S&P 500 ETF';
+  const sectorKey = stock.sector || '';
+  const etfTicker = benchmark?.etfTicker || (sectorKey ? SECTOR_ETF_MAP[sectorKey]?.ticker : undefined) || 'SPY';
+  const etfName = benchmark?.etfName || (sectorKey ? SECTOR_ETF_MAP[sectorKey]?.name : undefined) || 'SPDR S&P 500 ETF';
 
   return `
 ---

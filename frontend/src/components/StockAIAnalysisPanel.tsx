@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Bot, 
   Sparkles, 
@@ -350,9 +350,9 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
 
   // Datos para gráficos comparativos
   const peChartData = useMemo(() => {
-    const data = [
+    const data: { name: string; val: number; isCurrent: boolean; isSector?: boolean; label: string }[] = [
       { name: stock.ticker, val: stock.pe || 0, isCurrent: true, label: `${stock.pe ? stock.pe.toFixed(1) + 'x' : '—'}` },
-      { name: 'Prom. Sector', val: sectorAverages.pe, isSector: true, label: `${sectorAverages.pe}x` }
+      { name: 'Prom. Sector', val: sectorAverages.pe, isCurrent: false, isSector: true, label: `${sectorAverages.pe}x` }
     ];
     peers.forEach(p => {
       data.push({ name: p.ticker, val: p.pe || 0, isCurrent: false, label: `${p.pe ? p.pe.toFixed(1) + 'x' : '—'}` });
@@ -361,7 +361,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
   }, [stock, sectorAverages, peers]);
 
   const salesChartData = useMemo(() => {
-    const data = [
+    const data: { name: string; val: number; isCurrent: boolean; isSector?: boolean; label: string }[] = [
       { name: stock.ticker, val: financialData.salesB, isCurrent: true, label: `$${financialData.salesB}B` }
     ];
     peers.forEach(p => {
@@ -372,9 +372,9 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
   }, [stock, peers, financialData.salesB]);
 
   const roicChartData = useMemo(() => {
-    const data = [
+    const data: { name: string; val: number; isCurrent: boolean; isSector?: boolean; label: string }[] = [
       { name: stock.ticker, val: stock.roic || 0, isCurrent: true, label: `${(stock.roic || 0).toFixed(1)}%` },
-      { name: 'Prom. Sector', val: sectorAverages.roic, isSector: true, label: `${sectorAverages.roic}%` }
+      { name: 'Prom. Sector', val: sectorAverages.roic, isCurrent: false, isSector: true, label: `${sectorAverages.roic}%` }
     ];
     peers.forEach(p => {
       data.push({ name: p.ticker, val: p.roic || 0, isCurrent: false, label: `${p.roic ? p.roic.toFixed(1) + '%' : '—'}` });

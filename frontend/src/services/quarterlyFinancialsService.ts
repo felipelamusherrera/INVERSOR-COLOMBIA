@@ -201,6 +201,7 @@ export function buildQuarterlySeries(
     eps: number;
     eps_informado: number | null;
     eps_prevision: number | null;
+    fcf?: number | null;
     status: 'INFORMADO' | 'PREVISION';
     isReportedQuarter: boolean;
   }[] = [];
