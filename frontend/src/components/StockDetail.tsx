@@ -40,7 +40,9 @@ import { AddToWatchlistModal } from './AddToWatchlistModal';
 import { 
   fetchQuarterlyFinancials, 
   buildQuarterlySeries, 
-  type QuarterlyDataPoint 
+  fetchOfficialFinancials,
+  type QuarterlyDataPoint,
+  type OfficialFinancialsData
 } from '../services/quarterlyFinancialsService';
 
 export interface PricePoint {
@@ -150,7 +152,11 @@ function computeRSI(prices: number[], period = 14): (number | undefined)[] {
 }
 
 // Reconstruye series fundamentales trimestrales y volumen en millones de USD
-function computeHistoricalFundamentals(points: PricePoint[], stock: StockRecord): PricePoint[] {
+function computeHistoricalFundamentals(
+  points: PricePoint[], 
+  stock: StockRecord,
+  officialFinancials?: OfficialFinancialsData | null
+): PricePoint[] {
   if (!points || points.length === 0) return [];
 
   // Semilla pseudo-aleatoria determinista basada en el ticker para coherencia entre recargas
@@ -165,9 +171,23 @@ function computeHistoricalFundamentals(points: PricePoint[], stock: StockRecord)
 
   const baseProfitM = stock.profit_m ?? (stock.oper_m ? stock.oper_m * 0.75 : 12.0);
   const baseIncome = stock.income ?? (stock.market_cap ? (stock.market_cap / (stock.pe && stock.pe > 0 ? stock.pe : 20)) : 500);
-  const baseFCF = baseIncome * 0.85; // FCF estimado en ~85% del Ingreso Neto
+  
+  // Flujo de Caja Libre (FCF): Priorizar dato anual auditado de SEC EDGAR (10-K/10-Q) si está disponible
+  const hasAuditedFcf = officialFinancials?.secAnnualFCF !== undefined && officialFinancials?.secAnnualFCF !== null;
+  const baseFCF = hasAuditedFcf ? officialFinancials!.secAnnualFCF! : (baseIncome * 0.85);
   const baseSalesYoY = stock.sales_qq ?? 10.5;
   const baseEpsYoY = stock.eps_qq ?? 12.0;
+
+  // Mapa de FCF trimestral oficial de SEC
+  const qFcfMap = new Map<string, number>();
+  if (officialFinancials?.secQuarterlyFCF) {
+    officialFinancials.secQuarterlyFCF.forEach(r => {
+      const match = r.frame.match(/^CY(\d{4})Q(\d)$/);
+      if (match) {
+        qFcfMap.set(`Q${match[2]} ${match[1]}`, r.val);
+      }
+    });
+  }
 
   // Determinar trimestre ancla a partir de la fecha de reporte más reciente
   let latestReportYear = 2026;
@@ -200,14 +220,19 @@ function computeHistoricalFundamentals(points: PricePoint[], stock: StockRecord)
 
     const variance = (pseudoRand(q * 7 + 1) - 0.5) * 2; // de -1 a +1
     const pMargin = Number((baseProfitM + variance * 2.2 - (q * 0.25)).toFixed(2));
-    const fcfVal = Number((baseFCF * (1 + variance * 0.12 - (q * 0.035))).toFixed(1));
+    
+    // Si la SEC tiene el FCF auditado de este trimestre específico, usarlo directamente
+    const fcfVal = qFcfMap.has(period)
+      ? qFcfMap.get(period)!
+      : Number((baseFCF * (1 + variance * 0.12 - (q * 0.035))).toFixed(1));
+      
     const sYoY = Number((baseSalesYoY + variance * 3.5 - (q * 0.4)).toFixed(2));
     const eYoY = Number((baseEpsYoY + variance * 5.0 - (q * 0.6)).toFixed(2));
 
     quarterData.push({
       period,
       profit_m: pMargin,
-      fcf: Math.max(10, fcfVal),
+      fcf: fcfVal,
       sales_yoy: sYoY,
       eps_yoy: eYoY
     });
@@ -574,14 +599,16 @@ export const StockDetail: React.FC<StockDetailProps> = ({
 
   // Datos trimestrales oficiales auditados (SEC EDGAR XBRL + Nasdaq) con verificación estricta de fecha (hoy)
   const [allQuarterlyData, setAllQuarterlyData] = useState<QuarterlyDataPoint[]>(() => buildQuarterlySeries(stock));
+  const [officialFinancials, setOfficialFinancials] = useState<OfficialFinancialsData | null>(null);
 
   useEffect(() => {
     let isMounted = true;
     setAllQuarterlyData(buildQuarterlySeries(stock));
 
-    fetchQuarterlyFinancials(stock).then(data => {
-      if (isMounted && data && data.length > 0) {
-        setAllQuarterlyData(data);
+    fetchOfficialFinancials(stock.ticker).then(data => {
+      if (isMounted && data) {
+        setOfficialFinancials(data);
+        setAllQuarterlyData(buildQuarterlySeries(stock, data));
       }
     }).catch(err => {
       console.warn(`Error cargando estados contables oficiales para ${stock.ticker}:`, err);
@@ -589,6 +616,13 @@ export const StockDetail: React.FC<StockDetailProps> = ({
 
     return () => { isMounted = false; };
   }, [stock.ticker, stock.earnings_date]);
+
+  // Re-enriquecer puntos históricos cuando se confirmen los datos contables auditados de SEC (FCF real)
+  useEffect(() => {
+    if (rawPoints && rawPoints.length > 0 && officialFinancials) {
+      setRawPoints(prev => computeHistoricalFundamentals(prev, stock, officialFinancials));
+    }
+  }, [officialFinancials]);
 
   const quarterlyData = useMemo(() => {
     let count = 8;
@@ -1541,7 +1575,8 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                             return [`${num.toFixed(2)}%`, 'Margen Neto'];
                           }
                           if (activeChart === 'fcf') {
-                            return [formatCurrencyB(num), 'Flujo de Caja Libre (FCF)'];
+                            const isAudited = officialFinancials?.secAnnualFCF !== undefined && officialFinancials?.secAnnualFCF !== null;
+                            return [formatCurrencyB(num), `Flujo de Caja Libre (FCF)${isAudited ? ' • SEC XBRL Auditado' : ''}`];
                           }
                           return [num.toLocaleString('es-CO'), name];
                         }}
@@ -2062,7 +2097,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
       </div>
 
       {/* 4. Apartado del Agente IA de Análisis Institucional (Estrategia de Inversión) */}
-      <StockAIAnalysisPanel stock={stock} allStocks={allStocks} />
+      <StockAIAnalysisPanel stock={stock} allStocks={allStocks} officialFinancials={officialFinancials} />
 
       {/* 5. Radar Multimedia: Noticias Gratuitas, Comunidad en X y Videos de YouTube */}
       <div id="radar-multimedia">

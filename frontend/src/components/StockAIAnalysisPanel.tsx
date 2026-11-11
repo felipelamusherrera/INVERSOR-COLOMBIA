@@ -39,13 +39,45 @@ import type { StockRecord } from '../types/stock';
 import { formatCurrencyUSD, formatPercentage, calculateRealSMA, calculateNextEarningsDate } from '../utils/formatters';
 import { AddPositionModal } from './AddPositionModal';
 import { AddToWatchlistModal } from './AddToWatchlistModal';
+import { 
+  getLatestOfficialFinancials, 
+  fetchOfficialFinancials, 
+  type OfficialFinancialsData 
+} from '../services/quarterlyFinancialsService';
 
 interface StockAIAnalysisPanelProps {
   stock: StockRecord;
   allStocks?: StockRecord[];
+  officialFinancials?: OfficialFinancialsData | null;
 }
 
-export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stock, allStocks = [] }) => {
+export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ 
+  stock, 
+  allStocks = [],
+  officialFinancials
+}) => {
+  // Datos oficiales de estados contables SEC EDGAR / Nasdaq (cargados o sincronizados en memoria)
+  const [asyncOfficialFinancials, setAsyncOfficialFinancials] = useState<OfficialFinancialsData | null>(() => 
+    officialFinancials || getLatestOfficialFinancials(stock.ticker)
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+    if (officialFinancials) {
+      setAsyncOfficialFinancials(officialFinancials);
+      return;
+    }
+    const cached = getLatestOfficialFinancials(stock.ticker);
+    if (cached) {
+      setAsyncOfficialFinancials(cached);
+    }
+    fetchOfficialFinancials(stock.ticker).then(data => {
+      if (isMounted && data) {
+        setAsyncOfficialFinancials(data);
+      }
+    });
+    return () => { isMounted = false; };
+  }, [stock.ticker, officialFinancials]);
   // Vista principal: 'report' (Informe Completo 11 Secciones) vs 'tactical' (Tablero Táctico & Parámetros)
   const [activeTab, setActiveTab] = useState<'report' | 'tactical'>('report');
   
@@ -139,11 +171,16 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
       ? (rawIncome > 1e6 ? rawIncome : rawIncome * 1e6)
       : (salesInDollars * ((stock.profit_m || 15) / 100));
     
-    // FCF estimado al ~85% del ingreso neto (convención institucional estricta)
-    const fcfInDollars = incomeInDollars * 0.85;
+    // Flujo de Caja Libre (FCF): Priorizar dato anual auditado de SEC EDGAR (10-K / 10-Q) si está disponible
+    const hasAuditedFcf = asyncOfficialFinancials?.secAnnualFCF !== undefined && asyncOfficialFinancials?.secAnnualFCF !== null;
+    const fcfInDollars = hasAuditedFcf 
+      ? asyncOfficialFinancials!.secAnnualFCF! 
+      : (incomeInDollars * 0.85);
+
     const fcfFormatted = formatCurrencyUSD(fcfInDollars);
     const fcfB = Number((fcfInDollars / 1e9).toFixed(2));
     const fcfMargin = Number(((fcfInDollars / (salesInDollars || 1)) * 100).toFixed(1));
+    const isFcfAudited = hasAuditedFcf;
 
     // Distancia a ATH / 52W High (En Finviz / Supabase viene en w52_high, ej: -63.8%)
     const distAth = stock.w52_high !== undefined && stock.w52_high !== null
@@ -306,9 +343,10 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
       projectedFuture,
       annualOpExCapEx,
       backlogMonths,
-      growthScore
+      growthScore,
+      isFcfAudited
     };
-  }, [stock]);
+  }, [stock, asyncOfficialFinancials]);
 
   // Datos para gráficos comparativos
   const peChartData = useMemo(() => {
@@ -754,7 +792,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
                   [CONFIRMADO]
                 </span>
                 <div style={{ fontSize: '0.84rem', color: '#fff', fontWeight: 600, marginTop: '8px', lineHeight: 1.5 }}>
-                  Flujo de Caja Libre anual consolidado en {financialData.fcfFormatted}, con un margen FCF robusto del {financialData.fcfMargin}%.
+                  Flujo de Caja Libre anual consolidado en {financialData.fcfFormatted} {financialData.isFcfAudited && <span style={{ color: '#10b981', fontSize: '0.70rem', background: 'rgba(16,185,129,0.15)', padding: '2px 6px', borderRadius: '4px', marginLeft: '6px' }}>SEC US-GAAP Auditado</span>}, con un margen FCF robusto del {financialData.fcfMargin}%.
                 </div>
               </div>
 
@@ -840,8 +878,17 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
                       <td className="font-mono" style={{ padding: '8px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--accent-green)' }}>{stock.profit_m ?? 16.5}%</td>
                     </tr>
                     <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                      <td style={{ padding: '8px 14px', color: 'var(--text-muted)' }}>Flujo Caja Libre (FCF)</td>
-                      <td className="font-mono" style={{ padding: '8px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--accent-green)' }}>{financialData.fcfFormatted}</td>
+                      <td style={{ padding: '8px 14px', color: 'var(--text-muted)' }}>
+                        Flujo Caja Libre (FCF)
+                        {financialData.isFcfAudited && (
+                          <span style={{ marginLeft: '6px', fontSize: '0.68rem', color: '#10b981', background: 'rgba(16,185,129,0.12)', padding: '1px 5px', borderRadius: '4px' }}>
+                            SEC XBRL
+                          </span>
+                        )}
+                      </td>
+                      <td className="font-mono" style={{ padding: '8px 14px', textAlign: 'right', fontWeight: 700, color: financialData.fcfB >= 0 ? 'var(--accent-green)' : '#f87171' }}>
+                        {financialData.fcfFormatted}
+                      </td>
                     </tr>
                     <tr>
                       <td style={{ padding: '8px 14px', color: 'var(--text-muted)' }}>Current Ratio</td>

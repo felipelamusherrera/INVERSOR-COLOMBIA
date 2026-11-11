@@ -1,5 +1,18 @@
 import type { StockRecord } from '../types/stock';
 
+export interface OfficialFinancialsData {
+  ticker: string;
+  companyName: string;
+  secQuarterlyRevenues?: { frame: string; val: number; date: string }[];
+  secQuarterlyEps?: { frame: string; val: number; date: string }[];
+  secAnnualFCF?: number | null;
+  secQuarterlyFCF?: { frame: string; val: number; date: string }[];
+  secOperatingCashFlow?: number | null;
+  secCapEx?: number | null;
+  nasdaqSurprises?: any[];
+  upcomingReport?: any;
+}
+
 export interface QuarterlyDataPoint {
   period: string; // e.g. "Q2 2026"
   quarterLabel: string; // e.g. "Q2 '26"
@@ -10,6 +23,7 @@ export interface QuarterlyDataPoint {
   eps: number; // Valor unificado para graficar barra
   eps_informado: number | null; // BPA oficial auditado (10-Q SEC)
   eps_prevision: number | null; // BPA estimado (consenso Wall Street)
+  fcf?: number | null; // Flujo de caja libre auditado en USD (SEC 10-Q)
   status: 'INFORMADO' | 'PREVISION';
   isReportedQuarter: boolean; // Último trimestre cerrado e informado
   sales_qoq: number;
@@ -76,12 +90,7 @@ export function parseEarningsDate(raw: string | undefined | null): ParsedEarning
  */
 export function buildQuarterlySeries(
   stock: StockRecord,
-  apiData?: {
-    secQuarterlyRevenues?: { frame: string; val: number; date: string }[];
-    secQuarterlyEps?: { frame: string; val: number; date: string }[];
-    nasdaqSurprises?: any[];
-    upcomingReport?: any;
-  }
+  apiData?: OfficialFinancialsData
 ): QuarterlyDataPoint[] {
   const now = new Date();
   const todayStr = now.toISOString().slice(0, 10);
@@ -127,7 +136,7 @@ export function buildQuarterlySeries(
     }
   }
 
-  // Mapa de datos reales de SEC EDGAR si están disponibles
+  // Mapa de datos reales de Ingresos de SEC EDGAR si están disponibles
   const secRevsMap = new Map<string, number>();
   if (apiData?.secQuarterlyRevenues) {
     apiData.secQuarterlyRevenues.forEach(r => {
@@ -135,6 +144,17 @@ export function buildQuarterlySeries(
       const match = r.frame.match(/^CY(\d{4})Q(\d)$/);
       if (match) {
         secRevsMap.set(`Q${match[2]} ${match[1]}`, r.val);
+      }
+    });
+  }
+
+  // Mapa de Flujo de Caja Libre (FCF) real de SEC EDGAR si está disponible
+  const secFcfMap = new Map<string, number>();
+  if (apiData?.secQuarterlyFCF) {
+    apiData.secQuarterlyFCF.forEach(r => {
+      const match = r.frame.match(/^CY(\d{4})Q(\d)$/);
+      if (match) {
+        secFcfMap.set(`Q${match[2]} ${match[1]}`, r.val);
       }
     });
   }
@@ -241,6 +261,8 @@ export function buildQuarterlySeries(
       }
     }
 
+    const qFcf = secFcfMap.has(period) ? secFcfMap.get(period)! : null;
+
     quartersRaw.push({
       period,
       quarterLabel,
@@ -251,6 +273,7 @@ export function buildQuarterlySeries(
       eps: qEps,
       eps_informado: epsInformado,
       eps_prevision: epsPrevision,
+      fcf: qFcf,
       status: 'INFORMADO',
       isReportedQuarter
     });
@@ -290,6 +313,7 @@ export function buildQuarterlySeries(
       eps: Number(forecastEps.toFixed(2)),
       eps_informado: null, // ¡NUNCA DATO INFORMADO EN FECHA FUTURA!
       eps_prevision: Number(forecastEps.toFixed(2)),
+      fcf: null,
       status: 'PREVISION',
       isReportedQuarter: false
     });
@@ -338,6 +362,39 @@ export function buildQuarterlySeries(
   });
 }
 
+const officialFinancialsMemoryCache = new Map<string, OfficialFinancialsData>();
+
+/**
+ * Retorna los datos oficiales de estados contables (SEC EDGAR y Nasdaq)
+ * previamente cargados en memoria para el ticker especificado.
+ */
+export function getLatestOfficialFinancials(ticker: string): OfficialFinancialsData | null {
+  if (!ticker) return null;
+  return officialFinancialsMemoryCache.get(ticker.toUpperCase().trim()) || null;
+}
+
+/**
+ * Consulta y almacena en caché los datos oficiales de estados contables (incluyendo FCF real, OCF y CapEx).
+ */
+export async function fetchOfficialFinancials(ticker: string): Promise<OfficialFinancialsData | null> {
+  const clean = (ticker || '').toUpperCase().trim();
+  if (!clean) return null;
+  if (officialFinancialsMemoryCache.has(clean)) {
+    return officialFinancialsMemoryCache.get(clean)!;
+  }
+  try {
+    const res = await fetch(`/api/financials/quarterly?ticker=${encodeURIComponent(clean)}`).catch(() => null);
+    if (res && res.ok) {
+      const data: OfficialFinancialsData = await res.json();
+      officialFinancialsMemoryCache.set(clean, data);
+      return data;
+    }
+  } catch (e) {
+    console.warn(`Error al consultar datos oficiales de ${clean}:`, e);
+  }
+  return null;
+}
+
 /**
  * Consulta la API institucional de estados contables (SEC EDGAR XBRL + Nasdaq)
  * o genera la serie contable calibrada aplicando verificación estricta de fecha.
@@ -346,7 +403,8 @@ export async function fetchQuarterlyFinancials(stock: StockRecord): Promise<Quar
   try {
     const res = await fetch(`/api/financials/quarterly?ticker=${encodeURIComponent(stock.ticker)}`).catch(() => null);
     if (res && res.ok) {
-      const apiData = await res.json();
+      const apiData: OfficialFinancialsData = await res.json();
+      officialFinancialsMemoryCache.set(stock.ticker.toUpperCase().trim(), apiData);
       return buildQuarterlySeries(stock, apiData);
     }
   } catch (err) {

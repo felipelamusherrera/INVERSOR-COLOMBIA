@@ -217,6 +217,10 @@ ${message}`
 
           let secQuarterlyRevenues: { frame: string; val: number; date: string }[] = []
           let secQuarterlyEps: { frame: string; val: number; date: string }[] = []
+          let secAnnualFCF: number | null = null
+          let secQuarterlyFCF: { frame: string; val: number; date: string }[] = []
+          let secOperatingCashFlow: number | null = null
+          let secCapEx: number | null = null
 
           if (tickerEntry) {
             try {
@@ -283,6 +287,69 @@ ${message}`
                   }
                   secQuarterlyEps = filteredEps.reverse()
                 }
+
+                // 3. Extracción de Flujo de Caja Operativo (OCF) y Gastos de Capital (CapEx) para FCF Real
+                const ocfKey = [
+                  'NetCashProvidedByUsedInOperatingActivities',
+                  'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',
+                ].find((k) => gaap[k]?.units?.USD)
+
+                const capexKey = [
+                  'PaymentsToAcquirePropertyPlantAndEquipment',
+                  'PaymentsToAcquireProductiveAssets',
+                  'PaymentsForPropertyPlantAndEquipment',
+                ].find((k) => gaap[k]?.units?.USD)
+
+                if (ocfKey) {
+                  const ocfUnits = gaap[ocfKey].units.USD || []
+                  const capexUnits = capexKey ? (gaap[capexKey].units?.USD || []) : []
+
+                  // FCF Anual (10-K)
+                  const annualOcf = ocfUnits.filter((u: any) => u.form === '10-K').slice(-1)[0]
+                  const annualCapex = capexUnits.filter((u: any) => u.form === '10-K').slice(-1)[0]
+                  if (annualOcf) {
+                    secOperatingCashFlow = Number(annualOcf.val)
+                    secCapEx = annualCapex ? Math.abs(Number(annualCapex.val)) : 0
+                    secAnnualFCF = secOperatingCashFlow - secCapEx
+                  }
+
+                  // Mapa de CapEx trimestral
+                  const capexMap = new Map<string, number>()
+                  for (const c of capexUnits) {
+                    const frame = c.frame || (c.fy && c.fp && c.fp.startsWith('Q') ? `CY${c.fy}${c.fp}` : null)
+                    if (frame) {
+                      capexMap.set(frame, Math.abs(Number(c.val)))
+                    }
+                  }
+
+                  const qFcfList: { frame: string; val: number; date: string }[] = []
+                  const seenFcfFrames = new Set<string>()
+
+                  for (let i = ocfUnits.length - 1; i >= 0; i--) {
+                    const u = ocfUnits[i]
+                    const frame = u.frame || (u.fy && u.fp && u.fp.startsWith('Q') ? `CY${u.fy}${u.fp}` : null)
+                    if (!frame || !frame.startsWith('CY') || !frame.includes('Q')) continue
+
+                    if (u.start && u.end) {
+                      const days = (new Date(u.end).getTime() - new Date(u.start).getTime()) / (1000 * 3600 * 24)
+                      if (days > 115) continue
+                    }
+
+                    if (!seenFcfFrames.has(frame)) {
+                      seenFcfFrames.add(frame)
+                      const qOcf = Number(u.val)
+                      const qCapex = capexMap.get(frame) || 0
+                      qFcfList.push({ frame, val: qOcf - qCapex, date: u.end || u.filed })
+                    }
+                  }
+                  secQuarterlyFCF = qFcfList.reverse()
+
+                  // Si no hay 10-K anual (ej. IPO reciente como CBRS), calcular TTM como la suma de los trimestres disponibles
+                  if (secAnnualFCF === null && secQuarterlyFCF.length > 0) {
+                    const last4 = secQuarterlyFCF.slice(-4)
+                    secAnnualFCF = last4.reduce((acc, curr) => acc + curr.val, 0)
+                  }
+                }
               }
             } catch (e) {
               console.error(`Error fetching SEC facts for ${ticker}:`, e)
@@ -329,6 +396,10 @@ ${message}`
             companyName: tickerEntry?.title || ticker,
             secQuarterlyRevenues,
             secQuarterlyEps,
+            secAnnualFCF,
+            secQuarterlyFCF,
+            secOperatingCashFlow,
+            secCapEx,
             nasdaqSurprises,
             upcomingReport,
             timestamp: new Date().toISOString(),
