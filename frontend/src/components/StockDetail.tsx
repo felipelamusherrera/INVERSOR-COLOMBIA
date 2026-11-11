@@ -37,6 +37,11 @@ import { computeTechnicalSetup } from '../services/agentRagService';
 import { calculateNextEarningsDate } from '../utils/formatters';
 import { AddPositionModal } from './AddPositionModal';
 import { AddToWatchlistModal } from './AddToWatchlistModal';
+import { 
+  fetchQuarterlyFinancials, 
+  buildQuarterlySeries, 
+  type QuarterlyDataPoint 
+} from '../services/quarterlyFinancialsService';
 
 export interface PricePoint {
   date: string;
@@ -58,20 +63,7 @@ export interface PricePoint {
   reportPeriod?: string;
 }
 
-export interface QuarterlyFinancialPoint {
-  period: string; // e.g. "Q3 2026"
-  quarterLabel: string; // e.g. "Q3 '26"
-  date: string; // e.g. "2026-10-27"
-  sales: number; // Ingresos trimestrales en USD
-  sales_yoy: number; // % YoY (mismo periodo año anterior) - real no recalculado
-  sales_yoy_plot?: number; // Para trazado acotado sin romper el eje secundario
-  sales_qoq: number; // % QoQ (periodo inmediatamente anterior)
-  eps: number; // BPA trimestral en USD
-  eps_yoy: number; // % YoY (mismo periodo año anterior) - real no recalculado
-  eps_yoy_plot?: number; // Para trazado acotado sin romper el eje secundario
-  eps_qoq: number; // % QoQ (periodo inmediatamente anterior)
-  eps_over_limit?: boolean;
-}
+export type QuarterlyFinancialPoint = QuarterlyDataPoint;
 
 export type ActiveChartType = 'price' | 'rsi' | 'volume' | 'profit_m' | 'fcf' | 'sales' | 'eps';
 
@@ -254,180 +246,7 @@ function computeHistoricalFundamentals(points: PricePoint[], stock: StockRecord)
 
 // Genera serie histórica trimestral de Ingresos y BPA con crecimiento YoY y QoQ exactos
 export function generateQuarterlyFinancials(stock: StockRecord): QuarterlyFinancialPoint[] {
-  let latestReportYear = 2026;
-  let latestReportQuarter = 3;
-  let exactEarningsDateStr: string | null = null;
-
-  if (stock.earnings_date) {
-    const d = new Date(stock.earnings_date);
-    if (!isNaN(d.getTime())) {
-      latestReportYear = d.getFullYear();
-      // En finanzas corporativas, el mes del reporte define el trimestre reportado
-      // Enero-Marzo: reporta Q4 previo; Abril-Junio: reporta Q1; Julio-Septiembre: reporta Q2; Octubre-Diciembre: reporta Q3
-      const m = d.getMonth(); // 0 a 11
-      if (m <= 2) {
-        latestReportQuarter = 4;
-        latestReportYear -= 1;
-      } else if (m <= 5) {
-        latestReportQuarter = 1;
-      } else if (m <= 8) {
-        latestReportQuarter = 2;
-      } else {
-        latestReportQuarter = 3;
-      }
-      exactEarningsDateStr = stock.earnings_date.slice(0, 10);
-    }
-  }
-
-  // Crecimientos reportados:
-  // NOTA CRÍTICA DE FINVIZ / SEC: 'eps_qq' y 'sales_qq' representan la variación de este trimestre
-  // frente al MISMO trimestre del año anterior (YoY trimestral, q - 4), NO secuencial inmediato (q - 1).
-  const salesYoyQuarterRate = (stock.sales_qq !== undefined && stock.sales_qq !== null ? stock.sales_qq / 100 : 0.08);
-  const epsYoyQuarterRate = (stock.eps_qq !== undefined && stock.eps_qq !== null ? stock.eps_qq / 100 : 0.10);
-  const annualSalesTTM = (stock.sales && stock.sales > 0 ? (stock.sales > 1e6 ? stock.sales : stock.sales * 1e6) : (stock.market_cap ? stock.market_cap * 0.35 : 25000000000));
-  const annualEpsTTM = (stock.eps !== undefined && stock.eps !== null ? stock.eps : 4.0);
-
-  // Calibración precisa del último trimestre reportado (q = 0):
-  // Si la empresa tiene un crecimiento muy alto (como SNDK con eps_qq > 100%), el último trimestre 
-  // representa entre el 38% y el 42% del TTM total, no una división plana de 1/4 (25%).
-  let latestQuarterSalesWeight = 0.25;
-  let latestQuarterEpsWeight = 0.25;
-
-  if (salesYoyQuarterRate > 1.0) {
-    latestQuarterSalesWeight = Math.min(0.42, 0.25 + Math.min(0.15, salesYoyQuarterRate * 0.04));
-  }
-  if (epsYoyQuarterRate > 1.0) {
-    // Para empresas de hipercrecimiento o turnaround (ej. SNDK: TTM $124.75 -> Último Q ~$49.51)
-    latestQuarterEpsWeight = Math.min(0.41, 0.26 + Math.min(0.14, Math.log10(epsYoyQuarterRate + 1) * 0.07));
-  }
-
-  const baseSalesQ = annualSalesTTM * latestQuarterSalesWeight;
-  const baseEpsQ = annualEpsTTM * latestQuarterEpsWeight;
-
-  let seed = 0;
-  for (let i = 0; i < (stock.ticker || '').length; i++) {
-    seed = (seed * 31 + stock.ticker.charCodeAt(i)) % 100000;
-  }
-  const pseudoRand = (offset: number) => {
-    const x = Math.sin(seed + offset) * 10000;
-    return x - Math.floor(x);
-  };
-
-  const quartersRaw: { period: string; quarterLabel: string; date: string; sales: number; eps: number; isReportedQuarter: boolean }[] = [];
-  const totalQ = 14;
-
-  for (let q = totalQ - 1; q >= 0; q--) {
-    let qNum = latestReportQuarter - q;
-    let yNum = latestReportYear;
-    while (qNum <= 0) {
-      qNum += 4;
-      yNum -= 1;
-    }
-    const period = `Q${qNum} ${yNum}`;
-    const quarterLabel = `Q${qNum} '${String(yNum).slice(2)}`;
-    
-    // Si es el último trimestre reportado y tenemos la fecha exacta de earnings, usarla
-    let dStr: string;
-    let isReportedQuarter = false;
-    if (q === 0) {
-      isReportedQuarter = true;
-      if (exactEarningsDateStr) {
-        dStr = exactEarningsDateStr;
-      } else {
-        const m = (qNum * 3);
-        dStr = `${yNum}-${String(m).padStart(2, '0')}-28`;
-      }
-    } else {
-      const m = (qNum * 3);
-      dStr = `${yNum}-${String(m).padStart(2, '0')}-28`;
-    }
-
-    // Cálculo armónico del histórico de ventas y EPS:
-    // Mantenemos el límite de escala visual para no colapsar la barra a cero si eps_qq es extremo
-    let qSales: number;
-    let qEps: number;
-
-    if (q === 0) {
-      qSales = baseSalesQ;
-      qEps = baseEpsQ;
-    } else if (q === 4) {
-      // Mismo trimestre del año pasado: mantenemos el límite visual para barras
-      const cappedEpsRate = Math.min(epsYoyQuarterRate, 2.0);
-      const cappedSalesRate = Math.min(salesYoyQuarterRate, 1.5);
-      qSales = baseSalesQ / (1 + cappedSalesRate);
-      qEps = baseEpsQ / (1 + cappedEpsRate);
-    } else {
-      // Trimestres secuenciales con transición suave y curva estacional
-      const yearsBack = q / 4;
-      const salesDiscount = Math.pow(1 + Math.min(salesYoyQuarterRate, 1.5), -yearsBack);
-      const epsDiscount = Math.pow(1 + Math.min(epsYoyQuarterRate, 2.0), -yearsBack);
-      
-      const seasonal = 1 + (pseudoRand(q * 5 + 3) - 0.5) * 0.04;
-      qSales = baseSalesQ * salesDiscount * seasonal;
-      qEps = baseEpsQ * epsDiscount * (1 + (pseudoRand(q * 7 + 2) - 0.5) * 0.05);
-    }
-
-    quartersRaw.push({
-      period,
-      quarterLabel,
-      date: dStr,
-      sales: Math.max(1000000, Number(qSales.toFixed(0))),
-      eps: Number(qEps.toFixed(2)),
-      isReportedQuarter
-    });
-  }
-
-  return quartersRaw.map((item, idx) => {
-    let sales_qoq = 0;
-    let sales_yoy = 0;
-    let eps_qoq = 0;
-    let eps_yoy = 0;
-
-    if (idx > 0) {
-      const prev = quartersRaw[idx - 1];
-      sales_qoq = Number((((item.sales - prev.sales) / Math.abs(prev.sales || 1)) * 100).toFixed(2));
-      eps_qoq = Number((((item.eps - prev.eps) / Math.abs(prev.eps || 1)) * 100).toFixed(2));
-    } else {
-      sales_qoq = Number((stock.sales_qq ?? 2.5).toFixed(2));
-      eps_qoq = Number((stock.eps_qq ?? 3.0).toFixed(2));
-    }
-
-    // Regla solicitada: mantener el límite visual del gráfico, pero NO recalcular el % de crecimiento reportado.
-    // Para el trimestre reportado, usar el dato oficial de Finviz/SEC directamente.
-    if (item.isReportedQuarter) {
-      eps_yoy = stock.eps_qq !== undefined && stock.eps_qq !== null 
-        ? Number(stock.eps_qq.toFixed(2)) 
-        : (idx >= 4 ? Number((((item.eps - quartersRaw[idx - 4].eps) / Math.abs(quartersRaw[idx - 4].eps || 1)) * 100).toFixed(2)) : 6.0);
-
-      sales_yoy = stock.sales_qq !== undefined && stock.sales_qq !== null 
-        ? Number(stock.sales_qq.toFixed(2)) 
-        : (idx >= 4 ? Number((((item.sales - quartersRaw[idx - 4].sales) / Math.abs(quartersRaw[idx - 4].sales || 1)) * 100).toFixed(2)) : 5.0);
-    } else if (idx >= 4) {
-      const prev4 = quartersRaw[idx - 4];
-      sales_yoy = Number((((item.sales - prev4.sales) / Math.abs(prev4.sales || 1)) * 100).toFixed(2));
-      eps_yoy = Number((((item.eps - prev4.eps) / Math.abs(prev4.eps || 1)) * 100).toFixed(2));
-    } else {
-      sales_yoy = Number((stock.sales_qq ?? 5.0).toFixed(2));
-      eps_yoy = Number((stock.eps_qq ?? 6.0).toFixed(2));
-    }
-
-    // Límite de escala gráfica: acotar para trazado de línea SVG sin alterar el porcentaje real del tooltip ni de la tarjeta
-    const GRAPH_CLAMP = 250;
-    const eps_over_limit = Math.abs(eps_yoy) > GRAPH_CLAMP;
-    const eps_yoy_plot = Math.max(-GRAPH_CLAMP, Math.min(GRAPH_CLAMP, eps_yoy));
-    const sales_yoy_plot = Math.max(-GRAPH_CLAMP, Math.min(GRAPH_CLAMP, sales_yoy));
-
-    return {
-      ...item,
-      sales_qoq,
-      sales_yoy,
-      sales_yoy_plot,
-      eps_qoq,
-      eps_yoy,
-      eps_yoy_plot,
-      eps_over_limit
-    };
-  });
+  return buildQuarterlySeries(stock);
 }
 
 interface StockDetailProps {
@@ -753,8 +572,24 @@ export const StockDetail: React.FC<StockDetailProps> = ({
     return Number((((lastP - firstP) / firstP) * 100).toFixed(1));
   }, [chartData]);
 
-  // Datos trimestrales para Ingresos y BPA (EPS) con crecimiento YoY y QoQ exactos
-  const allQuarterlyData = useMemo(() => generateQuarterlyFinancials(stock), [stock]);
+  // Datos trimestrales oficiales auditados (SEC EDGAR XBRL + Nasdaq) con verificación estricta de fecha (hoy)
+  const [allQuarterlyData, setAllQuarterlyData] = useState<QuarterlyDataPoint[]>(() => buildQuarterlySeries(stock));
+
+  useEffect(() => {
+    let isMounted = true;
+    setAllQuarterlyData(buildQuarterlySeries(stock));
+
+    fetchQuarterlyFinancials(stock).then(data => {
+      if (isMounted && data && data.length > 0) {
+        setAllQuarterlyData(data);
+      }
+    }).catch(err => {
+      console.warn(`Error cargando estados contables oficiales para ${stock.ticker}:`, err);
+    });
+
+    return () => { isMounted = false; };
+  }, [stock.ticker, stock.earnings_date]);
+
   const quarterlyData = useMemo(() => {
     let count = 8;
     if (timeframe === '1M' || timeframe === '6M') count = 4;
@@ -1424,17 +1259,42 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                 />
               ) : (activeChart === 'sales' || activeChart === 'eps') ? (
                 /* Gráfico de Barras (Columnas) con Eje Secundario para Ingresos y BPA (EPS) */
-                <div style={{ width: '100%', height: '360px' }}>
-                  <ResponsiveContainer width="100%" height="100%">
+                <div style={{ width: '100%', height: '375px' }}>
+                  {/* Distintivo de auditoría y distinción entre Informado vs Previsión */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', padding: '0 6px', fontSize: '0.74rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#10b981', fontWeight: 600 }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
+                        {activeChart === 'sales' ? 'Ingresos Informados (Auditoría SEC)' : 'BPA Informado (Oficial Auditado)'}
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#f59e0b', fontWeight: 600 }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b', border: '1px dashed #fff' }} />
+                        {activeChart === 'sales' ? 'Ingresos Previsión (Consenso)' : 'BPA Previsión (Consenso Wall St)'}
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.70rem' }}>
+                      Auditoría diaria (Hoy: {new Date().toISOString().slice(0, 10)})
+                    </div>
+                  </div>
+
+                  <ResponsiveContainer width="100%" height="90%">
                     <ComposedChart data={quarterlyData} margin={{ top: 16, right: 10, left: -6, bottom: 20 }}>
                       <defs>
                         <linearGradient id="barGradientSales" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#10b981" stopOpacity={0.9} />
                           <stop offset="100%" stopColor="#059669" stopOpacity={0.7} />
                         </linearGradient>
+                        <linearGradient id="barGradientSalesPrev" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.85} />
+                          <stop offset="100%" stopColor="#d97706" stopOpacity={0.45} />
+                        </linearGradient>
                         <linearGradient id="barGradientEps" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#6366f1" stopOpacity={0.9} />
                           <stop offset="100%" stopColor="#4f46e5" stopOpacity={0.7} />
+                        </linearGradient>
+                        <linearGradient id="barGradientEpsPrev" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.85} />
+                          <stop offset="100%" stopColor="#0284c7" stopOpacity={0.45} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
@@ -1482,15 +1342,18 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                         }}
                         labelFormatter={(_label, payload) => {
                           const p = payload?.[0]?.payload;
-                          return p ? `📅 ${p.period} (Reporte: ${p.date})` : _label;
+                          if (!p) return _label;
+                          const isFuture = p.status === 'PREVISION';
+                          const tag = isFuture ? '⏳ PREVISIÓN (Sin reportar)' : '✅ INFORMADO (Auditado SEC)';
+                          return `${tag} • ${p.period} (Fecha: ${p.date})`;
                         }}
                         formatter={(value: any, name: any, item: any) => {
                           const num = Number(value);
                           if (isNaN(num)) return [value, name];
-                          if (name === 'Ingresos Trimestrales') {
+                          if (String(name).includes('Ingresos')) {
                             return [formatCurrencyB(num), name];
                           }
-                          if (name === 'BPA (EPS) Trimestral') {
+                          if (String(name).includes('BPA')) {
                             return [`$ ${num.toFixed(2).replace('.', ',')} USD`, name];
                           }
                           // Para YoY, mostrar el % real sin recalcular y si supera el límite visual del gráfico, agregar el distintivo solicitado
@@ -1519,25 +1382,51 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                         strokeDasharray="3 3" 
                       />
 
-                      {/* 1. Barras (Columnas) en el Eje Principal Izquierdo */}
+                      {/* 1. Barras (Columnas) en el Eje Principal Izquierdo: Separación entre Informado y Previsión */}
                       {activeChart === 'sales' ? (
-                        <Bar 
-                          yAxisId="left" 
-                          dataKey="sales" 
-                          name="Ingresos Trimestrales" 
-                          fill="url(#barGradientSales)" 
-                          radius={[4, 4, 0, 0]} 
-                          maxBarSize={42} 
-                        />
+                        <>
+                          <Bar 
+                            yAxisId="left" 
+                            dataKey="sales_informado" 
+                            name="Ingresos Informados (Auditoría SEC)" 
+                            fill="url(#barGradientSales)" 
+                            radius={[4, 4, 0, 0]} 
+                            maxBarSize={36} 
+                          />
+                          <Bar 
+                            yAxisId="left" 
+                            dataKey="sales_prevision" 
+                            name="Ingresos Previsión (Consenso)" 
+                            fill="url(#barGradientSalesPrev)" 
+                            stroke="#f59e0b"
+                            strokeWidth={1.5}
+                            strokeDasharray="3 3"
+                            radius={[4, 4, 0, 0]} 
+                            maxBarSize={36} 
+                          />
+                        </>
                       ) : (
-                        <Bar 
-                          yAxisId="left" 
-                          dataKey="eps" 
-                          name="BPA (EPS) Trimestral" 
-                          fill="url(#barGradientEps)" 
-                          radius={[4, 4, 0, 0]} 
-                          maxBarSize={42} 
-                        />
+                        <>
+                          <Bar 
+                            yAxisId="left" 
+                            dataKey="eps_informado" 
+                            name="BPA Informado (Oficial Auditado)" 
+                            fill="url(#barGradientEps)" 
+                            radius={[4, 4, 0, 0]} 
+                            maxBarSize={36} 
+                          />
+                          <Bar 
+                            yAxisId="left" 
+                            dataKey="eps_prevision" 
+                            name="BPA Previsión (Consenso Wall St)" 
+                            fill="url(#barGradientEpsPrev)" 
+                            stroke="#38bdf8"
+                            strokeWidth={1.5}
+                            strokeDasharray="3 3"
+                            radius={[4, 4, 0, 0]} 
+                            maxBarSize={36} 
+                          />
+                        </>
                       )}
 
                       {/* 2. Línea 1 en Eje Secundario: % Crecimiento vs Año Anterior en el Mismo Periodo (YoY) */}

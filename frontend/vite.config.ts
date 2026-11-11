@@ -164,6 +164,185 @@ ${message}`
           )
         }
       })
+
+      // Caché y middleware para Estados Contables Trimestrales (SEC EDGAR XBRL + Nasdaq)
+      let cachedSecTickers: Record<string, { cik_str: number; ticker: string; title: string }> | null = null
+      const quarterlyFinancialsCache = new Map<string, { data: any; timestamp: number }>()
+      const QUARTERLY_TTL_MS = 60 * 60 * 1000 // 1 hora de caché
+
+      server.middlewares.use('/api/financials/quarterly', async (req, res) => {
+        if (req.method === 'OPTIONS') {
+          res.writeHead(200, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+          })
+          res.end()
+          return
+        }
+
+        try {
+          const urlObj = new URL(req.url || '', 'http://localhost')
+          const ticker = (urlObj.searchParams.get('ticker') || '').toUpperCase().trim()
+          if (!ticker) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Ticker is required' }))
+            return
+          }
+
+          const cached = quarterlyFinancialsCache.get(ticker)
+          if (cached && Date.now() - cached.timestamp < QUARTERLY_TTL_MS) {
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+            res.end(JSON.stringify(cached.data))
+            return
+          }
+
+          // 1. Obtener CIK desde SEC
+          if (!cachedSecTickers) {
+            try {
+              const secTRes = await fetch('https://www.sec.gov/files/company_tickers.json', {
+                headers: { 'User-Agent': 'InversorColombia admin@inversorcolombia.com' },
+              })
+              if (secTRes.ok) {
+                cachedSecTickers = await secTRes.json()
+              }
+            } catch (e) {
+              console.error('Error fetching SEC tickers:', e)
+            }
+          }
+
+          const tickerEntry = cachedSecTickers
+            ? Object.values(cachedSecTickers).find((t) => t.ticker === ticker)
+            : null
+
+          let secQuarterlyRevenues: { frame: string; val: number; date: string }[] = []
+          let secQuarterlyEps: { frame: string; val: number; date: string }[] = []
+
+          if (tickerEntry) {
+            try {
+              const cik = String(tickerEntry.cik_str).padStart(10, '0')
+              const factsRes = await fetch(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`, {
+                headers: { 'User-Agent': 'InversorColombia admin@inversorcolombia.com' },
+              })
+              if (factsRes.ok) {
+                const facts = await factsRes.json()
+                const gaap = facts.facts?.['us-gaap'] || {}
+
+                const revKey = [
+                  'RevenueFromContractWithCustomerExcludingAssessedTax',
+                  'Revenues',
+                  'SalesRevenueNet',
+                  'SalesRevenueGoodsNet',
+                ].find((k) => gaap[k]?.units?.USD)
+                if (revKey) {
+                  const revUnits = gaap[revKey].units.USD || []
+                  const filteredRevs: { frame: string; val: number; date: string }[] = []
+                  const seenFrames = new Set<string>()
+
+                  for (let i = revUnits.length - 1; i >= 0; i--) {
+                    const u = revUnits[i]
+                    const frame = u.frame || (u.fy && u.fp && u.fp.startsWith('Q') ? `CY${u.fy}${u.fp}` : null)
+                    if (!frame || !frame.startsWith('CY') || !frame.includes('Q')) continue
+
+                    // Filtrar períodos acumulados de 6 o 9 meses en 10-Q
+                    if (u.start && u.end) {
+                      const days = (new Date(u.end).getTime() - new Date(u.start).getTime()) / (1000 * 3600 * 24)
+                      if (days > 115) continue
+                    }
+
+                    if (!seenFrames.has(frame)) {
+                      seenFrames.add(frame)
+                      filteredRevs.push({ frame, val: Number(u.val), date: u.end || u.filed })
+                    }
+                  }
+                  secQuarterlyRevenues = filteredRevs.reverse()
+                }
+
+                const epsKey = ['EarningsPerShareDiluted', 'EarningsPerShareBasic'].find(
+                  (k) => gaap[k]?.units?.['USD/shares']
+                )
+                if (epsKey) {
+                  const epsUnits = gaap[epsKey].units['USD/shares'] || []
+                  const filteredEps: { frame: string; val: number; date: string }[] = []
+                  const seenFrames = new Set<string>()
+
+                  for (let i = epsUnits.length - 1; i >= 0; i--) {
+                    const u = epsUnits[i]
+                    const frame = u.frame || (u.fy && u.fp && u.fp.startsWith('Q') ? `CY${u.fy}${u.fp}` : null)
+                    if (!frame || !frame.startsWith('CY') || !frame.includes('Q')) continue
+
+                    if (u.start && u.end) {
+                      const days = (new Date(u.end).getTime() - new Date(u.start).getTime()) / (1000 * 3600 * 24)
+                      if (days > 115) continue
+                    }
+
+                    if (!seenFrames.has(frame)) {
+                      seenFrames.add(frame)
+                      filteredEps.push({ frame, val: Number(u.val), date: u.end || u.filed })
+                    }
+                  }
+                  secQuarterlyEps = filteredEps.reverse()
+                }
+              }
+            } catch (e) {
+              console.error(`Error fetching SEC facts for ${ticker}:`, e)
+            }
+          }
+
+          // 2. Obtener Histórico de Sorpresas y Próximo Reporte desde Nasdaq
+          let nasdaqSurprises: any[] = []
+          let upcomingReport: any = null
+
+          try {
+            const [surpRes, dateRes] = await Promise.all([
+              fetch(`https://api.nasdaq.com/api/company/${ticker}/earnings-surprise`, {
+                headers: {
+                  'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+                  Accept: 'application/json, text/plain, */*',
+                },
+              }).catch(() => null),
+              fetch(`https://api.nasdaq.com/api/analyst/${ticker}/earnings-date`, {
+                headers: {
+                  'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+                  Accept: 'application/json, text/plain, */*',
+                },
+              }).catch(() => null),
+            ])
+
+            if (surpRes && surpRes.ok) {
+              const surpJson = await surpRes.json()
+              nasdaqSurprises = surpJson?.data?.earningsSurpriseTable?.rows || []
+            }
+
+            if (dateRes && dateRes.ok) {
+              const dateJson = await dateRes.json()
+              upcomingReport = dateJson?.data || null
+            }
+          } catch (e) {
+            console.error(`Error fetching Nasdaq data for ${ticker}:`, e)
+          }
+
+          const resultPayload = {
+            ticker,
+            companyName: tickerEntry?.title || ticker,
+            secQuarterlyRevenues,
+            secQuarterlyEps,
+            nasdaqSurprises,
+            upcomingReport,
+            timestamp: new Date().toISOString(),
+          }
+
+          quarterlyFinancialsCache.set(ticker, { data: resultPayload, timestamp: Date.now() })
+
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+          res.end(JSON.stringify(resultPayload))
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: err?.message || 'Error processing quarterly financials' }))
+        }
+      })
     },
   }
 }
@@ -197,6 +376,34 @@ export default defineConfig(({ mode }) => {
           headers: {
             'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+          },
+        },
+        '/api/nasdaq': {
+          target: 'https://api.nasdaq.com',
+          changeOrigin: true,
+          rewrite: (p) => p.replace(/^\/api\/nasdaq/, '/api'),
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+          },
+        },
+        '/api/sec-facts': {
+          target: 'https://data.sec.gov',
+          changeOrigin: true,
+          rewrite: (p) => p.replace(/^\/api\/sec-facts/, '/api/xbrl'),
+          headers: {
+            'User-Agent': 'InversorColombia admin@inversorcolombia.com',
+            'Accept': 'application/json',
+          },
+        },
+        '/api/sec-tickers': {
+          target: 'https://www.sec.gov',
+          changeOrigin: true,
+          rewrite: (p) => p.replace(/^\/api\/sec-tickers/, '/files/company_tickers.json'),
+          headers: {
+            'User-Agent': 'InversorColombia admin@inversorcolombia.com',
+            'Accept': 'application/json',
           },
         },
       },
