@@ -145,8 +145,14 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
     const fcfB = Number((fcfInDollars / 1e9).toFixed(2));
     const fcfMargin = Number(((fcfInDollars / (salesInDollars || 1)) * 100).toFixed(1));
 
-    // Distancia a ATH / 52W High
-    const distAth = stock.dist_52w_high ? Number(stock.dist_52w_high.toFixed(2)) : -14.2;
+    // Distancia a ATH / 52W High (En Finviz / Supabase viene en w52_high, ej: -63.8%)
+    const distAth = stock.w52_high !== undefined && stock.w52_high !== null
+      ? Number(stock.w52_high.toFixed(2))
+      : (stock.dist_52w_high !== undefined && stock.dist_52w_high !== null
+        ? Number(stock.dist_52w_high.toFixed(2))
+        : (stock.price && stock.all_time_high && stock.all_time_high > 0
+          ? Number((((stock.price - stock.all_time_high) / stock.all_time_high) * 100).toFixed(2))
+          : 0));
 
     // Valor Intrínseco estimado (GF Value / DCF a 3 meses)
     const intrinsicValue = Number((price * 1.28).toFixed(2));
@@ -624,8 +630,12 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
 
               <div style={{ background: '#070b14', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
                 <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Distancia a ATH</div>
-                <div className="font-mono" style={{ fontSize: '1.25rem', fontWeight: 800, color: financialData.distAth >= -15 ? 'var(--accent-green)' : '#f59e0b' }}>
-                  {financialData.distAth.toFixed(1)}%
+                <div className="font-mono" style={{ 
+                  fontSize: '1.25rem', 
+                  fontWeight: 800, 
+                  color: financialData.distAth >= -15 ? 'var(--accent-green)' : financialData.distAth >= -35 ? '#f59e0b' : 'var(--accent-red)' 
+                }}>
+                  {financialData.distAth > 0 ? '+' : ''}{financialData.distAth.toFixed(1)}%
                 </div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>Distancia al 52W High</div>
               </div>
@@ -930,13 +940,13 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({ stoc
                 <div className="font-mono" style={{
                   fontSize: '3.2rem',
                   fontWeight: 900,
-                  color: financialData.distAth >= -15 ? 'var(--accent-green)' : '#f59e0b',
+                  color: financialData.distAth >= -15 ? 'var(--accent-green)' : financialData.distAth >= -35 ? '#f59e0b' : 'var(--accent-red)',
                   margin: '8px 0'
                 }}>
-                  {financialData.distAth.toFixed(1)}%
+                  {financialData.distAth > 0 ? '+' : ''}{financialData.distAth.toFixed(1)}%
                 </div>
                 <div style={{ fontSize: '0.80rem', color: 'var(--text-secondary)' }}>
-                  Cotiza a <strong style={{ color: '#fff' }}>${financialData.price.toFixed(2)} USD</strong> con soporte consolidado
+                  Cotiza a <strong style={{ color: '#fff' }}>${financialData.price.toFixed(2)} USD</strong> {financialData.distAth >= -15 ? 'con soporte consolidado cerca de máximos' : 'en fase de consolidación bajo máximos anuales'}
                 </div>
               </div>
 

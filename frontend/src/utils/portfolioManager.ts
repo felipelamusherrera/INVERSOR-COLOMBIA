@@ -67,3 +67,4 @@ export function deletePortfolioPosition(id: string): void {
   const positions = getPortfolioPositions().filter((p) => p.id !== id);
   savePortfolioPositions(positions);
 }
+

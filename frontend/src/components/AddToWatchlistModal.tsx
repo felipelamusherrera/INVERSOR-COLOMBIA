@@ -279,3 +279,4 @@ export const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
     </div>
   );
 };
+

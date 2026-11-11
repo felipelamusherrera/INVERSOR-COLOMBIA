@@ -19,6 +19,7 @@ export interface StockRecord {
   ps?: number;
   ev_ebitda?: number;
   ev_sales?: number;
+  pe_3y_avg?: number;
 
   // EPS, Sales & Growth
   eps?: number;
@@ -80,6 +81,7 @@ export interface StockRecord {
   w52_range?: string;
   w52_high?: number;
   w52_low?: number;
+  dist_52w_high?: number;
   all_time_high?: number;
   all_time_low?: number;
   beta?: number;

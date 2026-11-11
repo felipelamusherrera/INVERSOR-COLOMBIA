@@ -185,3 +185,4 @@ export function getAllWatchlistTickers(lists?: CustomWatchlist[]): string[] {
   allLists.forEach((l) => l.tickers.forEach((t) => set.add(t)));
   return Array.from(set);
 }
+

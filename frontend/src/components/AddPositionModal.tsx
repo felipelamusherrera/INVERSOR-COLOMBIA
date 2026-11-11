@@ -428,3 +428,4 @@ export const AddPositionModal: React.FC<AddPositionModalProps> = ({
     </div>
   );
 };
+
