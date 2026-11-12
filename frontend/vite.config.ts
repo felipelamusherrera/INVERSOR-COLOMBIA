@@ -90,21 +90,22 @@ REGLAS ESTRICTAS DE AUDITORÍA Y PRECISIÓN:
 4. En análisis operativos o técnicos, aplica nuestra regla institucional de Riesgo Medio-Alto (Horizonte Swing a 3 meses): especifica Zona de Entrada, Stop Loss técnico, Target 1 (donde se activa el Trailing Stop a Breakeven) y Target 2 (rumbo a Valor Intrínseco).
 5. Intención detectada: ${intent || 'general_market'}.`
 
-          const historyText = Array.isArray(conversationHistory)
-            ? conversationHistory
-                .slice(-4)
-                .map((m: { role: string; content: string }) => `${m.role === 'user' ? 'Inversor' : 'InversorAI'}: ${m.content}`)
-                .join('\n\n')
-            : ''
+          const sanitizedMessage = typeof message === 'string' ? message.trim().slice(0, 1500) : ''
+          const sanitizedRag = typeof ragPromptContext === 'string' ? ragPromptContext.slice(0, 6000) : ''
 
-          const fullPrompt = `${systemInstruction}
+          const recentHistory = Array.isArray(conversationHistory)
+            ? conversationHistory.slice(-4).map((m: { role: string; content: string }) => ({
+                role: m.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: (m.content || '').slice(0, 1000) }],
+              }))
+            : []
 
-=== CONTEXTO RAG FINANCIERO EN VIVO (SUPABASE) ===
-${ragPromptContext || 'Consulta general de mercado.'}
-
-${historyText ? `=== HISTORIAL RECIENTE DE CONVERSACIÓN ===\n${historyText}\n` : ''}
-=== CONSULTA ACTUAL DEL INVERSOR ===
-${message}`
+          const currentPromptTurn = {
+            role: 'user',
+            parts: [{
+              text: `=== CONTEXTO RAG FINANCIERO EN VIVO (SUPABASE) ===\n${sanitizedRag || 'Consulta general de mercado.'}\n\n=== CONSULTA ACTUAL DEL INVERSOR ===\n${sanitizedMessage}`,
+            }],
+          }
 
           // Prioridad: gemini-1.5-pro (Razonamiento Institucional) -> gemini-2.0-flash -> gemini-1.5-flash
           const modelsToTry = ['gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash']
@@ -117,7 +118,10 @@ ${message}`
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+                systemInstruction: {
+                  parts: [{ text: systemInstruction }],
+                },
+                contents: [...recentHistory, currentPromptTurn],
                 generationConfig: {
                   temperature: 0.2,
                   topP: 0.9,

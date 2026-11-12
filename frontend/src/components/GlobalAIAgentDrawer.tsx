@@ -60,6 +60,7 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastSendTimeRef = useRef<number>(0);
 
   // Ancho dinámico del drawer con persistencia en localStorage
   const [drawerWidth, setDrawerWidth] = useState<number>(() => {
@@ -293,6 +294,11 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
   const handleSendQuery = async (customPrompt?: string, explicitIntent?: AgentIntentType) => {
     const textToSend = (customPrompt ?? inputMessage).trim();
     if (!textToSend || isLoading) return;
+
+    // Control de frecuencia UI: prevenir doble clic o envíos accidentales en ráfaga
+    const now = Date.now();
+    if (now - lastSendTimeRef.current < 2000) return;
+    lastSendTimeRef.current = now;
 
     if (!customPrompt) {
       setInputMessage('');

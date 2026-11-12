@@ -1395,7 +1395,28 @@ export async function queryInversorAIAgent(
       }
     }
   } catch {
-    // Continúa de forma transparente al motor institucional determinístico si el endpoint no responde
+    // Si el proxy local no responde, continuamos a la Edge Function oficial
+  }
+
+  // Paso 2.1: En producción (o si el proxy local falló), consultar directamente la Supabase Edge Function
+  if (!replyText) {
+    try {
+      const { data: edgeData, error: edgeError } = await supabase.functions.invoke('agent-chat', {
+        body: {
+          message: request.message,
+          activeTicker: ragContext.primaryStock?.ticker || request.activeTicker,
+          intent,
+          ragPromptContext,
+          conversationHistory: request.conversationHistory || [],
+        }
+      });
+      if (!edgeError && edgeData?.reply) {
+        replyText = edgeData.reply;
+        modelUsed = edgeData.modelUsed || 'gemini-1.5-pro (Supabase Edge Function)';
+      }
+    } catch {
+      // Fallback transparente al motor institucional determinístico
+    }
   }
 
   // Paso 3: Si el servidor indicó fallback o aún no se ha puesto la GEMINI_API_KEY en el .env del servidor,

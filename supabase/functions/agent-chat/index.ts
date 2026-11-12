@@ -20,6 +20,9 @@ interface EdgeAgentRequest {
   conversationHistory?: { role: 'user' | 'assistant'; content: string }[];
 }
 
+// Rastreador en memoria para Rate Limiting (mínimo 3 segundos entre consultas por usuario)
+const userCallTracker = new Map<string, number>();
+
 Deno.serve(async (req: Request) => {
   // Manejo de preflight CORS
   if (req.method === 'OPTIONS') {
@@ -55,10 +58,28 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // 1.1 Rate Limiting por usuario autenticado (Protección contra agotamiento de cuota)
+    const now = Date.now();
+    const lastCall = userCallTracker.get(authData.user.id);
+    if (lastCall && now - lastCall < 3000) {
+      return new Response(
+        JSON.stringify({
+          error: 'RATE_LIMIT_EXCEEDED',
+          message: 'Por favor espera unos segundos antes de enviar una nueva consulta al asistente.',
+        }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    userCallTracker.set(authData.user.id, now);
+
     const body: EdgeAgentRequest = await req.json();
     const { message, activeTicker, intent, ragPromptContext, conversationHistory = [] } = body;
 
-    if (!message || !message.trim()) {
+    // 1.2 Sanitización y truncamiento de tamaño máximo de texto de entrada
+    const sanitizedMessage = (message || '').trim().slice(0, 1500);
+    const sanitizedRag = (ragPromptContext || '').slice(0, 6000);
+
+    if (!sanitizedMessage) {
       return new Response(
         JSON.stringify({ error: 'El mensaje de consulta es obligatorio.' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -69,7 +90,7 @@ Deno.serve(async (req: Request) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_ANON_KEY') || '';
 
     // Si el frontend aún no inyectó contexto RAG, lo consultamos directamente en el servidor
-    let serverRagContext = ragPromptContext || '';
+    let serverRagContext = sanitizedRag;
     const dataSources: string[] = ['Supabase stocks_finviz (Tiempo Real)', 'Supabase prices_daily (OHLCV)'];
 
     if (!serverRagContext && supabaseKey && activeTicker) {
@@ -115,19 +136,18 @@ REGLAS ESTRICTAS DE AUDITORÍA Y PRECISIÓN (Pauta auditor-inversor):
 5. Intención detectada: ${intent || 'general_market'}.
 6. AUDITORÍA OBLIGATORIA DE FUENTES: Finaliza siempre con el bloque "Auditoría de Fuentes & Integridad de Datos (Estándar auditor-inversor)" con el Ticker, Compañía, Sector real, ETF sectorial verificado (XLK Tecnología, XLV Salud, etc.), corte de Supabase y sello "AUDIT STATUS: APPROVED BY AUDITOR_INVERSOR".`;
 
-    const historyText = conversationHistory
-      .slice(-4)
-      .map((m) => `${m.role === 'user' ? 'Inversor' : 'InversorAI'}: ${m.content}`)
-      .join('\n\n');
+    // 1.3 Historial reciente formateado para Gemini API
+    const recentHistory = conversationHistory.slice(-4).map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: (m.content || '').slice(0, 1000) }]
+    }));
 
-    const fullPrompt = `${systemInstruction}
-
-=== CONTEXTO RAG FINANCIERO EN VIVO (SUPABASE) ===
-${serverRagContext || 'Consulta general de mercado sin ticker único fijado.'}
-
-${historyText ? `=== HISTORIAL RECIENTE DE CONVERSACIÓN ===\n${historyText}\n` : ''}
-=== CONSULTA ACTUAL DEL INVERSOR ===
-${message}`;
+    const currentPromptTurn = {
+      role: 'user',
+      parts: [{
+        text: `=== CONTEXTO RAG FINANCIERO EN VIVO (SUPABASE) ===\n${serverRagContext || 'Consulta general de mercado sin ticker único fijado.'}\n\n=== CONSULTA DEL INVERSOR ===\n${sanitizedMessage}`
+      }]
+    };
 
     // Intentar primero con gemini-1.5-pro (máximo razonamiento analítico) y fallback automático a gemini-2.0-flash
     const modelsToTry = ['gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash'];
@@ -140,7 +160,10 @@ ${message}`;
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+          systemInstruction: {
+            parts: [{ text: systemInstruction }]
+          },
+          contents: [...recentHistory, currentPromptTurn],
           generationConfig: {
             temperature: 0.2,
             topP: 0.9,
