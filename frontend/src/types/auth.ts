@@ -44,5 +44,6 @@ export interface AuthContextType {
   resendConfirmationEmail: (email: string) => Promise<{ error: any }>;
   refreshProfile: () => Promise<void>;
   setIsPasswordRecoveryMode: (mode: boolean) => void;
+  cleanAuthUrl: () => void;
 }
 

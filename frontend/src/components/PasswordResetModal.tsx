@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { KeyRound, Mail, X, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, cleanAuthUrl } from '../context/AuthContext';
 
 interface PasswordResetModalProps {
   isOpen: boolean;
@@ -21,7 +21,8 @@ export const PasswordResetModal: React.FC<PasswordResetModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
 
-  if (!isOpen && !isRecoveryMode) return null;
+  // Si no está abierto, no renderizar bajo ninguna circunstancia
+  if (!isOpen) return null;
 
   // 1. Enviar correo de restablecimiento
   const handleSendEmail = async (e: React.FormEvent) => {
@@ -60,18 +61,22 @@ export const PasswordResetModal: React.FC<PasswordResetModalProps> = ({
     setLoading(false);
 
     if (error) {
-      toast.error(error.message || 'Error al actualizar la contraseña.');
+      // Manejar el caso donde el usuario ya la actualizó previamente en la sesión
+      if (error.message?.includes('different from the old password') || error.message?.includes('should be different')) {
+        toast.info('Tu contraseña ya ha sido registrada exitosamente con este valor. Puedes cerrar esta ventana e ingresar.');
+        handleClose();
+      } else {
+        toast.error(error.message || 'Error al actualizar la contraseña.');
+      }
     } else {
       toast.success('¡Contraseña actualizada exitosamente! Ahora tienes acceso.');
-      setIsPasswordRecoveryMode(false);
-      onClose();
+      handleClose();
     }
   };
 
   const handleClose = () => {
-    if (isRecoveryMode) {
-      setIsPasswordRecoveryMode(false);
-    }
+    setIsPasswordRecoveryMode(false);
+    cleanAuthUrl();
     setEmailSent(false);
     setEmail('');
     setNewPassword('');
@@ -104,23 +109,31 @@ export const PasswordResetModal: React.FC<PasswordResetModalProps> = ({
         boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
         position: 'relative'
       }}>
-        {/* Botón cerrar */}
-        {!isRecoveryMode && (
-          <button
-            onClick={handleClose}
-            style={{
-              position: 'absolute',
-              top: '20px',
-              right: '20px',
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-muted)',
-              cursor: 'pointer'
-            }}
-          >
-            <X size={20} />
-          </button>
-        )}
+        {/* Botón cerrar siempre disponible */}
+        <button
+          type="button"
+          onClick={handleClose}
+          aria-label="Cerrar modal"
+          style={{
+            position: 'absolute',
+            top: '20px',
+            right: '20px',
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-muted)',
+            cursor: 'pointer',
+            padding: '4px',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'color 0.2s ease'
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = '#fff')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+        >
+          <X size={20} />
+        </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
           <div style={{
@@ -201,22 +214,32 @@ export const PasswordResetModal: React.FC<PasswordResetModalProps> = ({
               />
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn btn-primary"
-              style={{
-                padding: '12px',
-                marginTop: '6px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                fontWeight: 700
-              }}
-            >
-              {loading ? <Loader2 size={18} className="animate-spin" /> : 'Guardar Nueva Contraseña'}
-            </button>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+              <button
+                type="button"
+                onClick={handleClose}
+                className="btn btn-secondary"
+                style={{ flex: 1, padding: '12px' }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn btn-primary"
+                style={{
+                  flex: 2,
+                  padding: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  fontWeight: 700
+                }}
+              >
+                {loading ? <Loader2 size={18} className="animate-spin" /> : 'Guardar Nueva Contraseña'}
+              </button>
+            </div>
           </form>
         ) : emailSent ? (
           /* CASO B: Correo ya enviado */

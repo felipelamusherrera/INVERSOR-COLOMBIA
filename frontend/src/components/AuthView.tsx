@@ -37,7 +37,9 @@ export const AuthView: React.FC<AuthViewProps> = ({
     user, 
     resendConfirmationEmail, 
     refreshProfile, 
-    isPasswordRecoveryMode 
+    isPasswordRecoveryMode,
+    setIsPasswordRecoveryMode,
+    cleanAuthUrl
   } = useAuth();
 
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
@@ -786,7 +788,11 @@ export const AuthView: React.FC<AuthViewProps> = ({
       {/* Modal de Restablecimiento de Contraseña */}
       <PasswordResetModal
         isOpen={showResetModal || isPasswordRecoveryMode}
-        onClose={() => setShowResetModal(false)}
+        onClose={() => {
+          setShowResetModal(false);
+          setIsPasswordRecoveryMode(false);
+          cleanAuthUrl();
+        }}
         isRecoveryMode={isPasswordRecoveryMode}
       />
     </div>

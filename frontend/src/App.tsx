@@ -359,11 +359,11 @@ function AppContent() {
     <div className="app-container">
       <Toaster position="top-right" richColors theme="dark" />
 
-      {/* Modal Global de Restablecimiento de Contraseña (siempre accesible desde correo de recuperación) */}
+      {/* Modal Global de Restablecimiento de Contraseña (activado únicamente desde correo de recuperación) */}
       <PasswordResetModal
         isOpen={isPasswordRecoveryMode}
         onClose={() => setIsPasswordRecoveryMode(false)}
-        isRecoveryMode={true}
+        isRecoveryMode={isPasswordRecoveryMode}
       />
 
       {/* Barra de Navegación Institucional */}
