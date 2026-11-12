@@ -79,8 +79,90 @@ CREATE TRIGGER trg_protect_profile_roles
     BEFORE UPDATE ON public.profiles
     FOR EACH ROW EXECUTE FUNCTION public.protect_profile_roles();
 
+-- ------------------------------------------------------------------------------
+-- 3. ASIGNACIÓN Y SINCRONIZACIÓN OFICIAL DE ADMINISTRADORES MAESTROS
+-- Otorgar rol 'admin' a los correos autorizados en public.profiles y actualizar trigger
+-- ------------------------------------------------------------------------------
+UPDATE public.profiles 
+SET role = 'admin', updated_at = NOW()
+WHERE LOWER(email) IN ('neuronata25@gmail.com', 'felipelamusherrera@gmail.com');
+
+CREATE OR REPLACE FUNCTION public.handle_user_sync()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.profiles (
+        id, 
+        email, 
+        full_name, 
+        document_type, 
+        document_number, 
+        phone, 
+        country, 
+        city, 
+        role, 
+        status,
+        email_confirmed_at,
+        created_at,
+        updated_at
+    )
+    VALUES (
+        NEW.id,
+        NEW.email,
+        COALESCE(NEW.raw_user_meta_data->>'full_name', ''),
+        COALESCE(NEW.raw_user_meta_data->>'document_type', 'CC'),
+        COALESCE(NEW.raw_user_meta_data->>'document_number', ''),
+        COALESCE(NEW.raw_user_meta_data->>'phone', ''),
+        COALESCE(NEW.raw_user_meta_data->>'country', 'Colombia'),
+        COALESCE(NEW.raw_user_meta_data->>'city', ''),
+        CASE 
+            WHEN LOWER(NEW.email) IN ('neuronata25@gmail.com', 'felipelamusherrera@gmail.com') THEN 'admin' 
+            ELSE 'user' 
+        END,
+        'active',
+        NEW.email_confirmed_at,
+        NEW.created_at,
+        NOW()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        email = EXCLUDED.email,
+        email_confirmed_at = EXCLUDED.email_confirmed_at,
+        full_name = CASE 
+            WHEN EXCLUDED.full_name IS NOT NULL AND EXCLUDED.full_name <> '' THEN EXCLUDED.full_name 
+            ELSE profiles.full_name 
+        END,
+        document_type = CASE 
+            WHEN EXCLUDED.document_number IS NOT NULL AND EXCLUDED.document_number <> '' THEN EXCLUDED.document_type 
+            ELSE profiles.document_type 
+        END,
+        document_number = CASE 
+            WHEN EXCLUDED.document_number IS NOT NULL AND EXCLUDED.document_number <> '' THEN EXCLUDED.document_number 
+            ELSE profiles.document_number 
+        END,
+        phone = CASE 
+            WHEN EXCLUDED.phone IS NOT NULL AND EXCLUDED.phone <> '' THEN EXCLUDED.phone 
+            ELSE profiles.phone 
+        END,
+        country = CASE 
+            WHEN EXCLUDED.country IS NOT NULL AND EXCLUDED.country <> '' THEN EXCLUDED.country 
+            ELSE profiles.country 
+        END,
+        city = CASE 
+            WHEN EXCLUDED.city IS NOT NULL AND EXCLUDED.city <> '' THEN EXCLUDED.city 
+            ELSE profiles.city 
+        END,
+        role = CASE 
+            WHEN LOWER(EXCLUDED.email) IN ('neuronata25@gmail.com', 'felipelamusherrera@gmail.com') THEN 'admin' 
+            ELSE profiles.role 
+        END,
+        updated_at = NOW();
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
 -- Confirmación de estado de políticas
 SELECT tablename, policyname, roles, cmd 
 FROM pg_policies 
 WHERE tablename IN ('profiles', 'stock_prices_history')
 ORDER BY tablename, policyname;
+

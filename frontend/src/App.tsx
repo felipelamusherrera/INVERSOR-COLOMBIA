@@ -17,7 +17,8 @@ import { AuthView } from './components/AuthView';
 import { UserAdminModule } from './components/UserAdminModule';
 import type { AgentIntentType, ScreenerUIFilterPayload } from './types/agent';
 import { Toaster, toast } from 'sonner';
-import { AlertCircle, RefreshCw, Database, ShieldCheck } from 'lucide-react';
+import { AlertCircle, RefreshCw, Database, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { PasswordResetModal } from './components/PasswordResetModal';
 
 export type MainTabType = 
   | 'dashboard' 
@@ -31,7 +32,17 @@ export type MainTabType =
   | 'user-admin';
 
 function AppContent() {
-  const { user, loading: authLoading, isEmailConfirmed, isAdmin } = useAuth();
+  const { 
+    user, 
+    profile, 
+    loading: authLoading, 
+    isEmailConfirmed, 
+    isAdmin, 
+    isSuspended, 
+    isPasswordRecoveryMode, 
+    setIsPasswordRecoveryMode,
+    signOut 
+  } = useAuth();
 
   const [stocks, setStocks] = useState<StockRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -270,10 +281,90 @@ function AppContent() {
     );
   }
 
+  // 3.1. USUARIO SUSPENDIDO ADMINISTRATIVAMENTE: MOSTRAR BLOQUEO ESTRICTO
+  if (isSuspended || profile?.status === 'suspended') {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh',
+        background: 'radial-gradient(ellipse at top, #0f172a 0%, #030712 100%)',
+        padding: '24px'
+      }}>
+        <Toaster position="top-right" richColors theme="dark" />
+        <div style={{
+          maxWidth: '500px',
+          width: '100%',
+          background: 'rgba(15, 23, 42, 0.85)',
+          backdropFilter: 'blur(20px)',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          borderRadius: '24px',
+          padding: '40px 32px',
+          textAlign: 'center',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)'
+        }}>
+          <div style={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '16px',
+            background: 'rgba(239, 68, 68, 0.15)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 20px auto'
+          }}>
+            <ShieldAlert size={34} color="#ef4444" />
+          </div>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>
+            Cuenta Suspendida
+          </h2>
+          <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '24px' }}>
+            Tu cuenta ha sido suspendida administrativamente. Si consideras que se trata de un error o deseas reactivar tu acceso, por favor contacta al equipo de soporte de Inversor Colombia.
+          </p>
+          <div style={{
+            background: 'rgba(239, 68, 68, 0.08)',
+            border: '1px solid rgba(239, 68, 68, 0.2)',
+            borderRadius: '12px',
+            padding: '12px',
+            fontSize: '0.85rem',
+            color: '#fca5a5',
+            marginBottom: '28px'
+          }}>
+            Usuario: <strong>{profile?.email || user?.email}</strong>
+          </div>
+          <button
+            onClick={() => signOut()}
+            style={{
+              padding: '12px 24px',
+              borderRadius: '12px',
+              border: 'none',
+              background: 'rgba(255, 255, 255, 0.1)',
+              color: '#fff',
+              fontSize: '0.9rem',
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            Cerrar Sesión
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // 4. USUARIO AUTENTICADO Y CONFIRMADO: ACCESO COMPLETO A LA PLATAFORMA
   return (
     <div className="app-container">
       <Toaster position="top-right" richColors theme="dark" />
+
+      {/* Modal Global de Restablecimiento de Contraseña (siempre accesible desde correo de recuperación) */}
+      <PasswordResetModal
+        isOpen={isPasswordRecoveryMode}
+        onClose={() => setIsPasswordRecoveryMode(false)}
+        isRecoveryMode={true}
+      />
 
       {/* Barra de Navegación Institucional */}
       <Navbar

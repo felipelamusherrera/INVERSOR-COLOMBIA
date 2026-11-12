@@ -34,6 +34,7 @@ export interface AuthContextType {
   loading: boolean;
   isAdmin: boolean;
   isEmailConfirmed: boolean;
+  isSuspended: boolean;
   isPasswordRecoveryMode: boolean;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (data: RegisterFormData) => Promise<{ error: any; needsEmailConfirmation?: boolean }>;

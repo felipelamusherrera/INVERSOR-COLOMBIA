@@ -115,7 +115,7 @@ BEGIN
         COALESCE(NEW.raw_user_meta_data->>'country', 'Colombia'),
         COALESCE(NEW.raw_user_meta_data->>'city', ''),
         CASE 
-            WHEN LOWER(NEW.email) = 'neuronata25@gmail.com' THEN 'admin' 
+            WHEN LOWER(NEW.email) IN ('neuronata25@gmail.com', 'felipelamusherrera@gmail.com') THEN 'admin' 
             ELSE 'user' 
         END,
         'active',
@@ -151,7 +151,7 @@ BEGIN
             ELSE profiles.city 
         END,
         role = CASE 
-            WHEN LOWER(EXCLUDED.email) = 'neuronata25@gmail.com' THEN 'admin' 
+            WHEN LOWER(EXCLUDED.email) IN ('neuronata25@gmail.com', 'felipelamusherrera@gmail.com') THEN 'admin' 
             ELSE profiles.role 
         END,
         updated_at = NOW();

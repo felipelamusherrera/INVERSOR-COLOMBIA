@@ -55,7 +55,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user && isMounted) {
           setUser(session.user);
-          await fetchProfile(session.user.id, session.user.email);
+          const prof = await fetchProfile(session.user.id, session.user.email);
+          if (prof?.status === 'suspended') {
+            await supabase.auth.signOut();
+            if (isMounted) {
+              setUser(null);
+              setProfile(prof);
+            }
+          }
         }
       } catch (err) {
         console.error('Error initializing auth session:', err);
@@ -76,7 +83,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (session?.user) {
         setUser(session.user);
-        await fetchProfile(session.user.id, session.user.email);
+        const prof = await fetchProfile(session.user.id, session.user.email);
+        if (prof?.status === 'suspended') {
+          await supabase.auth.signOut();
+          if (isMounted) {
+            setUser(null);
+            setProfile(prof);
+          }
+        }
       } else {
         setUser(null);
         setProfile(null);
@@ -103,7 +117,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (data.user) {
         setUser(data.user);
-        await fetchProfile(data.user.id, data.user.email);
+        const prof = await fetchProfile(data.user.id, data.user.email);
+        if (prof?.status === 'suspended') {
+          await supabase.auth.signOut();
+          setUser(null);
+          setProfile(prof);
+          return {
+            error: new Error('Tu cuenta se encuentra suspendida por el administrador. Contacta al soporte técnico si crees que es un error.')
+          };
+        }
       }
 
       return { error: null };
@@ -197,10 +219,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // Validación de estado de confirmación de correo
-  // Un usuario está confirmado si user.email_confirmed_at tiene fecha o profile.email_confirmed_at tiene fecha
+  // Prioridad a la firma de Supabase Auth (user.email_confirmed_at), con fallback a profile
   const isEmailConfirmed = Boolean(
     user && (user.email_confirmed_at || profile?.email_confirmed_at)
   );
+
+  // Estatus de cuenta suspendida
+  const isSuspended = Boolean(profile?.status === 'suspended');
 
   // Rol Administrador: verificado en profile.role === 'admin' o correos maestros autorizados
   const isAdmin = Boolean(
@@ -215,6 +240,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         loading,
         isAdmin,
         isEmailConfirmed,
+        isSuspended,
         isPasswordRecoveryMode,
         signIn,
         signUp,
