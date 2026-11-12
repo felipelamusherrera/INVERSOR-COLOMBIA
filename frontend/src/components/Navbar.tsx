@@ -15,6 +15,9 @@ import {
   X
 } from 'lucide-react';
 import type { StockRecord } from '../types/stock';
+import { Users, LogOut, ShieldCheck } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { toast } from 'sonner';
 
 interface NavbarProps {
   currentTab: string;
@@ -45,6 +48,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleAgentDrawer,
   isAgentDrawerOpen
 }) => {
+  const { user, profile, isAdmin, signOut } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
   const [marketTime, setMarketTime] = useState('');
@@ -304,6 +308,32 @@ export const Navbar: React.FC<NavbarProps> = ({
             Mi Cartera
           </button>
 
+          {/* Módulo de Administración de Usuarios (Exclusivo para Admins) */}
+          {isAdmin && (
+            <button
+              id="nav-btn-user-admin"
+              className={`btn ${currentTab === 'user-admin' ? 'btn-active' : 'btn-secondary'}`}
+              style={{
+                padding: '6px 11px',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                background: currentTab === 'user-admin' 
+                  ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)' 
+                  : 'rgba(6, 182, 212, 0.12)',
+                border: '1px solid rgba(6, 182, 212, 0.35)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px'
+              }}
+              onClick={() => setCurrentTab('user-admin')}
+              title="Panel Administrativo de Usuarios"
+            >
+              <Users size={14} color="var(--accent-cyan)" />
+              Gestión Usuarios
+            </button>
+          )}
+
           {onToggleAgentDrawer && (
             <button
               id="nav-btn-agent-drawer"
@@ -360,6 +390,77 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Perfil de Usuario Logueado & Botón Cerrar Sesión */}
+        {user && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            background: 'var(--bg-surface)',
+            padding: '4px 10px',
+            borderRadius: '8px',
+            border: '1px solid var(--border-subtle)',
+            flexShrink: 0
+          }}>
+            <div style={{
+              width: '28px',
+              height: '28px',
+              borderRadius: '7px',
+              background: isAdmin 
+                ? 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)' 
+                : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              color: '#fff',
+              fontWeight: 800,
+              fontSize: '0.74rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}>
+              {(profile?.full_name || user.email || 'U').charAt(0).toUpperCase()}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', maxWidth: '120px' }}>
+              <span style={{
+                fontSize: '0.74rem',
+                color: '#fff',
+                fontWeight: 700,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}>
+                {profile?.full_name?.split(' ')[0] || user.email?.split('@')[0]}
+              </span>
+              <span style={{
+                fontSize: '0.62rem',
+                color: isAdmin ? 'var(--accent-cyan)' : 'var(--accent-green)',
+                fontWeight: 800
+              }}>
+                {isAdmin ? 'ADMIN' : 'USUARIO'}
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                signOut();
+                toast.info('Sesión cerrada correctamente');
+              }}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: '4px',
+                borderRadius: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                marginLeft: '4px'
+              }}
+              title="Cerrar sesión"
+            >
+              <LogOut size={14} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 2. SUB-BARRA DE PESTAÑAS MÚLTIPLES PARA ACCIONES ABIERTAS (Sin cerrar las anteriores) */}

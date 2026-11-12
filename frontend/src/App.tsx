@@ -12,6 +12,9 @@ import { FinvizMap } from './components/FinvizMap';
 import { StrategyAIModule } from './components/StrategyAIModule';
 import { GlobalAIAgentDrawer } from './components/GlobalAIAgentDrawer';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthView } from './components/AuthView';
+import { UserAdminModule } from './components/UserAdminModule';
 import type { AgentIntentType, ScreenerUIFilterPayload } from './types/agent';
 import { Toaster, toast } from 'sonner';
 import { AlertCircle, RefreshCw, Database, ShieldCheck } from 'lucide-react';
@@ -24,14 +27,24 @@ export type MainTabType =
   | 'ai-strategy' 
   | 'detail' 
   | 'peers' 
-  | 'watchlist';
+  | 'watchlist'
+  | 'user-admin';
 
-export function App() {
+function AppContent() {
+  const { user, loading: authLoading, isEmailConfirmed, isAdmin } = useAuth();
+
   const [stocks, setStocks] = useState<StockRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentTab, setCurrentTab] = useState<MainTabType>('dashboard');
   const [snapshotDate, setSnapshotDate] = useState<string | null>(null);
+
+  // Redirigir si un usuario no administrador intenta entrar a la pestaña de administración
+  useEffect(() => {
+    if (currentTab === 'user-admin' && !isAdmin) {
+      setCurrentTab('dashboard');
+    }
+  }, [currentTab, isAdmin]);
 
   // Sistema de Pestañas Múltiples de Acciones (No cierra la ventana de la acción anterior)
   const [openStockTabs, setOpenStockTabs] = useState<string[]>(['MU']);
@@ -162,8 +175,11 @@ export function App() {
   };
 
   useEffect(() => {
-    loadStocks();
-  }, []);
+    // Cargar datos del mercado solo si el usuario está autenticado y confirmado
+    if (user && isEmailConfirmed) {
+      loadStocks();
+    }
+  }, [user, isEmailConfirmed]);
 
   // Seleccionar stock y abrirlo en una nueva pestaña sin cerrar las anteriores
   const handleSelectStock = (stock: StockRecord) => {
@@ -182,15 +198,14 @@ export function App() {
     setCurrentTab('detail');
   };
 
-  // Cerrar pestaña de una acción
-  const handleCloseStockTab = (ticker: string) => {
-    const filtered = openStockTabs.filter(t => t !== ticker);
-    setOpenStockTabs(filtered);
+  // Cerrar una pestaña de acción abierta
+  const handleCloseStockTab = (tickerToClose: string) => {
+    const updated = openStockTabs.filter(t => t !== tickerToClose);
+    setOpenStockTabs(updated);
 
-    if (activeStockTicker === ticker) {
-      if (filtered.length > 0) {
-        setActiveStockTicker(filtered[filtered.length - 1]);
-        setCurrentTab('detail');
+    if (activeStockTicker === tickerToClose) {
+      if (updated.length > 0) {
+        setActiveStockTicker(updated[updated.length - 1]);
       } else {
         setActiveStockTicker(null);
         setCurrentTab('screener');
@@ -199,17 +214,71 @@ export function App() {
   };
 
   // Acción activa actual
-  const currentActiveStock = stocks.find(s => s.ticker === activeStockTicker) || stocks[0] || null;
+  const currentActiveStock = stocks.find(s => s.ticker === activeStockTicker) || 
+    (stocks.length > 0 ? stocks[0] : null);
 
+  // 1. PANTALLA DE CARGA DE SESIÓN
+  if (authLoading) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#030712',
+        color: '#fff',
+        flexDirection: 'column',
+        gap: '16px'
+      }}>
+        <div style={{
+          width: '52px',
+          height: '52px',
+          borderRadius: '14px',
+          background: 'linear-gradient(135deg, #06b6d4 0%, #10b981 100%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 0 30px rgba(6, 182, 212, 0.45)'
+        }}>
+          <ShieldCheck size={30} color="#fff" />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.92rem', color: 'var(--text-secondary)' }}>
+          <RefreshCw size={16} className="animate-spin" color="var(--accent-cyan)" />
+          Cargando Inversor Colombia...
+        </div>
+      </div>
+    );
+  }
+
+  // 2. USUARIO NO AUTENTICADO: MOSTRAR FORMULARIO DE ACCESO (LOGIN / REGISTRO)
+  if (!user) {
+    return (
+      <>
+        <Toaster position="top-right" richColors theme="dark" />
+        <AuthView initialMode="login" />
+      </>
+    );
+  }
+
+  // 3. USUARIO CON CORREO NO CONFIRMADO: MOSTRAR BLOQUEO HASTA VALIDACIÓN
+  if (!isEmailConfirmed) {
+    return (
+      <>
+        <Toaster position="top-right" richColors theme="dark" />
+        <AuthView emailUnconfirmed={true} />
+      </>
+    );
+  }
+
+  // 4. USUARIO AUTENTICADO Y CONFIRMADO: ACCESO COMPLETO A LA PLATAFORMA
   return (
     <div className="app-container">
-      {/* Toast Notifier Sonner */}
-      <Toaster position="top-right" richColors />
+      <Toaster position="top-right" richColors theme="dark" />
 
-      {/* Barra de Navegación Global con Sistema Multi-Pestaña */}
+      {/* Barra de Navegación Institucional */}
       <Navbar
         currentTab={currentTab}
-        setCurrentTab={(tab: any) => setCurrentTab(tab)}
+        setCurrentTab={(tab) => setCurrentTab(tab as MainTabType)}
         stocks={stocks}
         onSelectStock={handleSelectStock}
         selectedStock={currentActiveStock}
@@ -218,45 +287,30 @@ export function App() {
         onSwitchStockTab={handleSwitchStockTab}
         onCloseStockTab={handleCloseStockTab}
         lastUpdatedDate={snapshotDate}
-        onToggleAgentDrawer={() => setIsAgentDrawerOpen(prev => !prev)}
+        onToggleAgentDrawer={() => setIsAgentDrawerOpen(!isAgentDrawerOpen)}
         isAgentDrawerOpen={isAgentDrawerOpen}
       />
 
-      {/* Contenido Principal */}
+      {/* Contenedor Principal de Vistas */}
       <main className="main-content">
-        {loading ? (
+        {loading && stocks.length === 0 ? (
           <div style={{
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            minHeight: '65vh',
+            height: '60vh',
             gap: '16px'
           }}>
-            <div style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '50%',
-              border: '3px solid rgba(56, 189, 248, 0.1)',
-              borderTopColor: 'var(--brand-primary)',
-              animation: 'spin 1s linear infinite'
-            }} />
-            <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '1rem' }}>
-              Sincronizando modelos cuantitativos desde Supabase...
+            <RefreshCw size={36} className="animate-spin" color="var(--accent-cyan)" />
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
+              Cargando métricas de mercado en tiempo real desde Supabase...
             </div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-              Procesando más de 100 métricas financieras de Finviz y Factor Grades
-            </div>
-            <style>{`
-              @keyframes spin {
-                to { transform: rotate(360deg); }
-              }
-            `}</style>
           </div>
-        ) : error ? (
+        ) : error && stocks.length === 0 ? (
           <div style={{
             maxWidth: '600px',
-            margin: '80px auto',
+            margin: '60px auto',
             padding: '32px',
             background: 'rgba(239, 68, 68, 0.08)',
             border: '1px solid rgba(239, 68, 68, 0.25)',
@@ -298,7 +352,7 @@ export function App() {
               />
             )}
 
-            {/* 4. NUEVO MÓDULO: Maps Heatmap / Matriz Sectorial (Imagen 3) */}
+            {/* 3. Maps Heatmap / Matriz Sectorial */}
             {currentTab === 'maps' && (
               <FinvizMap
                 stocks={stocks}
@@ -306,7 +360,7 @@ export function App() {
               />
             )}
 
-            {/* 5. NUEVO MÓDULO: Estrategia IA Inversor (Feed / Muro + Registro de Posiciones) */}
+            {/* 4. Estrategia IA Inversor (Feed / Muro + Registro de Posiciones) */}
             {currentTab === 'ai-strategy' && (
               <StrategyAIModule
                 stocks={stocks}
@@ -315,7 +369,7 @@ export function App() {
               />
             )}
 
-            {/* 6. Análisis Detallado (Multi-Pestaña) */}
+            {/* 5. Análisis Detallado (Multi-Pestaña) */}
             {currentTab === 'detail' && currentActiveStock && (
               <ErrorBoundary fallbackTitle={`Error al cargar el análisis de ${currentActiveStock.ticker}`} onReset={() => setCurrentTab('screener')}>
                 <StockDetail
@@ -330,7 +384,7 @@ export function App() {
               </ErrorBoundary>
             )}
 
-            {/* 7. Comparador de Acciones */}
+            {/* 6. Comparador de Acciones */}
             {currentTab === 'peers' && (
               <PeersComparison
                 stocks={stocks}
@@ -341,7 +395,7 @@ export function App() {
               />
             )}
 
-            {/* 8. Mi Cartera Mejorada (Posiciones Long/Short, P&L en vivo, Gráfico Multi-temporal y Auditoría IA Fase 3) */}
+            {/* 7. Mi Cartera Mejorada (Posiciones Long/Short, P&L en vivo, Gráfico Multi-temporal y Auditoría IA Fase 3) */}
             {currentTab === 'watchlist' && (
               <Watchlist
                 stocks={stocks}
@@ -357,11 +411,25 @@ export function App() {
                 }
               />
             )}
+
+            {/* 8. Módulo de Administración de Usuarios (Exclusivo Administradores) */}
+            {currentTab === 'user-admin' && (
+              isAdmin ? (
+                <UserAdminModule />
+              ) : (
+                <MarketOverview
+                  stocks={stocks}
+                  onSelectStock={handleSelectStock}
+                  onGoToScreener={() => setCurrentTab('screener')}
+                  snapshotDate={snapshotDate}
+                />
+              )
+            )}
           </>
         )}
       </main>
 
-      {/* Panel Flotante y Drawer Global del Agente Inversor IA (Fase 2 & Fase 3) */}
+      {/* Panel Flotante y Drawer Global del Agente Inversor IA */}
       <GlobalAIAgentDrawer
         isOpen={isAgentDrawerOpen}
         onClose={() => setIsAgentDrawerOpen(false)}
@@ -394,12 +462,20 @@ export function App() {
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <ShieldCheck size={13} color="var(--state-success)" />
-              Histórico móvil 30 días
+              Control de Acceso & Perfiles RLS
             </span>
           </div>
         </div>
       </footer>
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 
