@@ -27,6 +27,17 @@ function agentBackendServerPlugin(geminiApiKey: string): Plugin {
           return
         }
 
+        // Validación de autenticación (Prevención de consumo no autorizado de cuota Gemini)
+        const authHeader = req.headers['authorization']
+        if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ 
+            error: 'UNAUTHORIZED', 
+            message: 'Se requiere iniciar sesión para consultar al Agente Inversor IA.' 
+          }))
+          return
+        }
+
         try {
           const chunks: Buffer[] = []
           for await (const chunk of req) {

@@ -46,15 +46,45 @@ CREATE POLICY "Users can read own profile"
 ON public.profiles FOR SELECT 
 USING (auth.uid() = id);
 
+-- Actualización restringida: el usuario no puede cambiar su rol ni su estatus
 DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
 CREATE POLICY "Users can update own profile" 
 ON public.profiles FOR UPDATE 
-USING (auth.uid() = id);
+USING (auth.uid() = id)
+WITH CHECK (
+    auth.uid() = id AND 
+    (public.is_admin() OR (
+        role = (SELECT p.role FROM public.profiles p WHERE p.id = auth.uid()) AND
+        status = (SELECT p.status FROM public.profiles p WHERE p.id = auth.uid())
+    ))
+);
 
 DROP POLICY IF EXISTS "Admins have full access" ON public.profiles;
 CREATE POLICY "Admins have full access" 
 ON public.profiles FOR ALL 
 USING (public.is_admin());
+
+-- 3.1 Trigger de protección reforzada contra escalada de privilegios a nivel de motor SQL
+CREATE OR REPLACE FUNCTION public.protect_profile_roles()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Si no es admin y no es service_role, impedir cualquier alteración a 'role' o 'status'
+    IF NOT (public.is_admin() OR current_setting('request.jwt.claim.role', true) = 'service_role') THEN
+        IF NEW.role IS DISTINCT FROM OLD.role THEN
+            RAISE EXCEPTION 'Operación no permitida: no tienes autorización para modificar el rol de usuario.';
+        END IF;
+        IF NEW.status IS DISTINCT FROM OLD.status THEN
+            RAISE EXCEPTION 'Operación no permitida: no tienes autorización para modificar el estatus de la cuenta.';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS trg_protect_profile_roles ON public.profiles;
+CREATE TRIGGER trg_protect_profile_roles
+    BEFORE UPDATE ON public.profiles
+    FOR EACH ROW EXECUTE FUNCTION public.protect_profile_roles();
 
 -- 4. Función y Trigger para sincronización automática desde auth.users
 CREATE OR REPLACE FUNCTION public.handle_user_sync()

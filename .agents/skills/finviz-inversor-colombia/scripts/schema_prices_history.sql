@@ -29,6 +29,7 @@ ALTER TABLE public.stock_prices_history ENABLE ROW LEVEL SECURITY;
 -- 4. Políticas de acceso público (Lectura y Escritura para la aplicación)
 DO $$
 BEGIN
+    -- 4.1 Lectura pública autorizada para usuarios y aplicación
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies 
         WHERE tablename = 'stock_prices_history' AND policyname = 'Lectura publica precios historicos'
@@ -40,14 +41,18 @@ BEGIN
         USING (true);
     END IF;
 
+    -- 4.2 Eliminar política insegura previa de escritura abierta si existiese
+    DROP POLICY IF EXISTS "Escritura precios historicos" ON public.stock_prices_history;
+
+    -- 4.3 Escritura segura restringida a service_role (ETL/sincronización) y administradores
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies 
-        WHERE tablename = 'stock_prices_history' AND policyname = 'Escritura precios historicos'
+        WHERE tablename = 'stock_prices_history' AND policyname = 'Escritura segura solo service_role y admin'
     ) THEN
-        CREATE POLICY "Escritura precios historicos"
+        CREATE POLICY "Escritura segura solo service_role y admin"
         ON public.stock_prices_history
         FOR ALL
-        TO anon, authenticated
+        TO service_role
         USING (true)
         WITH CHECK (true);
     END IF;

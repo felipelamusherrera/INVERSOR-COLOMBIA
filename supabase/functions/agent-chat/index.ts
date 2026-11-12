@@ -27,6 +27,34 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    // 1. Verificación obligatoria de autenticación (Prevención de abuso y agotamiento de cuota)
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'UNAUTHORIZED', 
+          message: 'Se requiere iniciar sesión con una cuenta activa para interactuar con el Agente Inversor IA.' 
+        }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://jptusquuyenbwrgasigt.supabase.co';
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
+    const supabaseAuthClient = createClient(supabaseUrl, supabaseAnonKey || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '');
+    
+    const { data: authData, error: authErr } = await supabaseAuthClient.auth.getUser(token);
+    if (authErr || !authData?.user) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'UNAUTHORIZED', 
+          message: 'Sesión no válida o expirada. Por favor, inicia sesión nuevamente.' 
+        }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const body: EdgeAgentRequest = await req.json();
     const { message, activeTicker, intent, ragPromptContext, conversationHistory = [] } = body;
 
@@ -38,7 +66,6 @@ Deno.serve(async (req: Request) => {
     }
 
     const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') || 'https://jptusquuyenbwrgasigt.supabase.co';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_ANON_KEY') || '';
 
     // Si el frontend aún no inyectó contexto RAG, lo consultamos directamente en el servidor
