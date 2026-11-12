@@ -191,8 +191,71 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
           ? Number((((stock.price - stock.all_time_high) / stock.all_time_high) * 100).toFixed(2))
           : 0));
 
-    // Valor Intrínseco estimado (GF Value / DCF a 3 meses)
-    const intrinsicValue = Number((price * 1.28).toFixed(2));
+    // =========================================================================
+    // CÁLCULO DINÁMICO DEL VALOR INTRÍNSECO (DCF + MÚLTIPLOS PETER LYNCH / GF VALUE™)
+    // =========================================================================
+    const rawShares = stock.outstanding ? (stock.outstanding > 1e6 ? stock.outstanding : stock.outstanding * 1e6) : (mcapInDollars / price);
+    const sharesCount = rawShares > 0 ? rawShares : 1e8;
+    const fcfPerShare = sharesCount > 0 ? (fcfInDollars / sharesCount) : 0;
+    const epsVal = (stock.eps !== undefined && stock.eps !== null) ? stock.eps : (sharesCount > 0 ? incomeInDollars / sharesCount : 0);
+    const epsGrowth = Math.min(Math.max((stock.eps_next_5y ?? stock.eps_past_5y ?? stock.sales_past_5y ?? 8), -15), 35);
+    const growthRate = Math.max(epsGrowth / 100, 0.02);
+
+    const ivComponents: { val: number; weight: number }[] = [];
+
+    // Método 1: Flujo de Caja Libre Descontado (DCF a 5 años con FCF auditado de SEC)
+    if (fcfPerShare > 0) {
+      const discountRate = 0.09; // WACC de referencia 9%
+      const terminalMultiple = Math.min(Math.max(stock.pe_3y_avg ?? stock.forward_pe ?? 18, 12), 26);
+      let pvFcf = 0;
+      for (let y = 1; y <= 5; y++) {
+        const projected = fcfPerShare * Math.pow(1 + Math.min(growthRate, 0.18), y);
+        pvFcf += projected / Math.pow(1 + discountRate, y);
+      }
+      const terminalVal = (fcfPerShare * Math.pow(1 + Math.min(growthRate, 0.18), 5) * terminalMultiple) / Math.pow(1 + discountRate, 5);
+      const dcfIv = pvFcf + terminalVal;
+      if (dcfIv > 0) {
+        ivComponents.push({ val: dcfIv, weight: 1.2 });
+      }
+    }
+
+    // Método 2: Peter Lynch / P/E Normalizado (Earnings Power Value)
+    if (epsVal > 0) {
+      const targetPe = Math.min(Math.max(stock.pe_3y_avg ?? (stock.forward_pe ? stock.forward_pe * 1.05 : (stock.pe ? stock.pe * 0.92 : 18)), 12), 32);
+      const lynchMultiple = Math.min(targetPe, 15 + Math.max(0, epsGrowth * 0.6));
+      const epsIv = epsVal * lynchMultiple;
+      if (epsIv > 0) {
+        ivComponents.push({ val: epsIv, weight: 1.0 });
+      }
+    }
+
+    // Método 3: Enfoque de Ventas (P/S Normalizado por margen bruto) si EPS o FCF son negativos
+    if (ivComponents.length === 0 || epsVal <= 0) {
+      const salesPerShare = sharesCount > 0 ? (salesInDollars / sharesCount) : price;
+      const grossMargin = stock.gross_m ?? 45;
+      let sustainablePs = (grossMargin / 100) * 4.2;
+      sustainablePs = Math.min(Math.max(sustainablePs, 1.2), 7.5);
+      const psIv = salesPerShare * sustainablePs;
+      ivComponents.push({ val: psIv, weight: epsVal <= 0 ? 1.5 : 0.6 });
+    }
+
+    // Media Ponderada
+    const totalWeight = ivComponents.reduce((acc, c) => acc + c.weight, 0);
+    const weightedIv = ivComponents.reduce((acc, c) => acc + (c.val * c.weight), 0) / (totalWeight || 1);
+
+    // Ajuste por Calidad y Balance (ROIC y Deuda/Patrimonio)
+    let qualityMod = 1.0;
+    if ((stock.roic ?? 10) >= 15) qualityMod += 0.06;
+    if ((stock.roic ?? 10) < 5 && (stock.roic ?? 10) >= 0) qualityMod -= 0.04;
+    if ((stock.debt_eq ?? 0.8) <= 0.6) qualityMod += 0.04;
+    if ((stock.debt_eq ?? 0.8) >= 1.6) qualityMod -= 0.06;
+
+    let finalIv = Number((weightedIv * qualityMod).toFixed(2));
+
+    // Banda institucional de coherencia de mercado (entre 0.45x y 2.1x del precio)
+    finalIv = Math.max(Number((price * 0.45).toFixed(2)), Math.min(Number((price * 2.10).toFixed(2)), finalIv));
+
+    const intrinsicValue = finalIv;
     const marginOfSafety = Number((((intrinsicValue - price) / intrinsicValue) * 100).toFixed(1));
 
     // Cálculos de SMA 50 y SMA 200 reales
@@ -645,23 +708,6 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
                       </span>
                     )}
                   </div>
-                  {stock.eps_qq !== undefined && stock.eps_qq !== null && Math.abs(stock.eps_qq) > 200 && (
-                    <div style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      padding: '2px 6px',
-                      borderRadius: '4px',
-                      background: 'rgba(245, 158, 11, 0.15)',
-                      color: '#f59e0b',
-                      fontSize: '0.66rem',
-                      fontWeight: 700,
-                      border: '1px solid rgba(245, 158, 11, 0.3)',
-                      marginBottom: '4px'
-                    }}>
-                      % &gt; límite gráfico, ver análisis
-                    </div>
-                  )}
                 </div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>Aceleración de beneficio</div>
               </div>
@@ -679,9 +725,9 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
               </div>
 
               <div style={{ background: '#070b14', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: '0.70rem', color: 'var(--accent-cyan)', textTransform: 'uppercase' }}>Margen de Seguridad</div>
-                <div className="font-mono" style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--accent-cyan)' }}>
-                  +{financialData.marginOfSafety}%
+                <div style={{ fontSize: '0.70rem', color: financialData.marginOfSafety >= 0 ? 'var(--accent-green)' : '#f87171', textTransform: 'uppercase' }}>Margen de Seguridad</div>
+                <div className="font-mono" style={{ fontSize: '1.25rem', fontWeight: 800, color: financialData.marginOfSafety >= 0 ? 'var(--accent-green)' : '#f87171' }}>
+                  {financialData.marginOfSafety >= 0 ? `+${financialData.marginOfSafety}%` : `${financialData.marginOfSafety}%`}
                 </div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>vs Intrínseco (${financialData.intrinsicValue})</div>
               </div>
@@ -694,7 +740,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
               <Building2 size={18} /> 1. ¿A qué se dedica?
             </h3>
             <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.8, margin: 0 }}>
-              <strong style={{ color: '#fff' }}>{stock.company} ({stock.ticker})</strong> opera como un actor dominante y de referencia estratégica dentro del sector <strong style={{ color: 'var(--accent-cyan)' }}>{stock.sector}</strong>, focalizado principalmente en la industria de <strong style={{ color: 'var(--accent-cyan)' }}>{stock.industry}</strong>. Su modelo de negocio destaca por una sólida disciplina operativa con un margen neto del <strong style={{ color: 'var(--accent-green)' }}>{stock.profit_m ?? 16.5}%</strong> y una capacidad sostenida de generación de Flujo de Caja Libre anual estimada en <strong style={{ color: 'var(--accent-green)' }}>{financialData.fcfFormatted}</strong>. La cotización actual de <strong style={{ color: '#fff' }}>${financialData.price.toFixed(2)} USD</strong> proporciona un Margen de Seguridad del <strong style={{ color: 'var(--accent-cyan)' }}>+{financialData.marginOfSafety}%</strong> respecto a su Valor Intrínseco estimado de <strong style={{ color: 'var(--accent-cyan)' }}>${financialData.intrinsicValue} USD</strong>, configurando una ventana de oportunidad asimétrica para un horizonte swing a 3 meses.
+              <strong style={{ color: '#fff' }}>{stock.company} ({stock.ticker})</strong> opera como un actor dominante y de referencia estratégica dentro del sector <strong style={{ color: 'var(--accent-cyan)' }}>{stock.sector}</strong>, focalizado principalmente en la industria de <strong style={{ color: 'var(--accent-cyan)' }}>{stock.industry}</strong>. Su modelo de negocio destaca por una sólida disciplina operativa con un margen neto del <strong style={{ color: 'var(--accent-green)' }}>{stock.profit_m ?? 16.5}%</strong> y una capacidad sostenida de generación de Flujo de Caja Libre anual estimada en <strong style={{ color: 'var(--accent-green)' }}>{financialData.fcfFormatted}</strong>. La cotización actual de <strong style={{ color: '#fff' }}>${financialData.price.toFixed(2)} USD</strong> proporciona un Margen de Seguridad del <strong style={{ color: financialData.marginOfSafety >= 0 ? 'var(--accent-green)' : '#f87171' }}>{financialData.marginOfSafety >= 0 ? `+${financialData.marginOfSafety}%` : `${financialData.marginOfSafety}%`}</strong> respecto a su Valor Intrínseco estimado de <strong style={{ color: 'var(--accent-cyan)' }}>${financialData.intrinsicValue} USD</strong>, configurando una ventana de oportunidad asimétrica para un horizonte swing a 3 meses.
             </p>
           </div>
 
@@ -801,7 +847,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
                   [CONFIRMADO]
                 </span>
                 <div style={{ fontSize: '0.84rem', color: '#fff', fontWeight: 600, marginTop: '8px', lineHeight: 1.5 }}>
-                  Margen de seguridad institucional del +{financialData.marginOfSafety}% frente al Valor Intrínseco estimado de ${financialData.intrinsicValue} USD.
+                  Margen de seguridad institucional del {financialData.marginOfSafety >= 0 ? `+${financialData.marginOfSafety}%` : `${financialData.marginOfSafety}%`} frente al Valor Intrínseco estimado de ${financialData.intrinsicValue} USD.
                 </div>
               </div>
 
@@ -1425,10 +1471,12 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
             </div>
 
             <div>
-              <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--accent-green)', fontWeight: 700 }}>Margen de Seguridad</div>
-              <div className="font-mono" style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--accent-green)' }}>+{financialData.marginOfSafety}%</div>
-              <div style={{ fontSize: '0.72rem', color: financialData.marginOfSafety >= 20 ? 'var(--accent-green)' : '#f59e0b', fontWeight: 700 }}>
-                {financialData.marginOfSafety >= 20 ? '✓ Cumple umbral institucional (≥ 20%)' : '⚠ Descuento ajustado (< 20%)'}
+              <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: financialData.marginOfSafety >= 0 ? 'var(--accent-green)' : '#f87171', fontWeight: 700 }}>Margen de Seguridad</div>
+              <div className="font-mono" style={{ fontSize: '1.6rem', fontWeight: 900, color: financialData.marginOfSafety >= 0 ? 'var(--accent-green)' : '#f87171' }}>
+                {financialData.marginOfSafety >= 0 ? `+${financialData.marginOfSafety}%` : `${financialData.marginOfSafety}%`}
+              </div>
+              <div style={{ fontSize: '0.72rem', color: financialData.marginOfSafety >= 20 ? 'var(--accent-green)' : financialData.marginOfSafety >= 0 ? 'var(--accent-cyan)' : '#f87171', fontWeight: 700 }}>
+                {financialData.marginOfSafety >= 20 ? '✓ Cumple umbral institucional (≥ 20%)' : financialData.marginOfSafety >= 0 ? '✓ Cotiza bajo valor intrínseco (< 20%)' : '⚠ Cotiza con prima sobre valor intrínseco'}
               </div>
             </div>
 

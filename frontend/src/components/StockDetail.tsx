@@ -2020,16 +2020,9 @@ export const StockDetail: React.FC<StockDetailProps> = ({
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Crecimiento EPS (QoQ):</span>
-              <div style={{ textAlign: 'right' }}>
-                <strong className="font-mono" style={{ color: stock.eps_qq && stock.eps_qq > 0 ? 'var(--accent-green)' : (stock.eps_qq ? 'var(--accent-red)' : 'var(--text-muted)') }}>
-                  {stock.eps_qq !== undefined && stock.eps_qq !== null ? `${stock.eps_qq.toFixed(2)}%` : 'Sin dato SEC'}
-                </strong>
-                {stock.eps_qq !== undefined && stock.eps_qq !== null && Math.abs(stock.eps_qq) > 200 && (
-                  <div style={{ fontSize: '0.65rem', color: '#f59e0b', fontWeight: 700 }}>
-                    % &gt; límite gráfico, ver análisis
-                  </div>
-                )}
-              </div>
+              <strong className="font-mono" style={{ color: stock.eps_qq && stock.eps_qq > 0 ? 'var(--accent-green)' : (stock.eps_qq ? 'var(--accent-red)' : 'var(--text-muted)') }}>
+                {stock.eps_qq !== undefined && stock.eps_qq !== null ? `${stock.eps_qq.toFixed(2)}%` : 'Sin dato SEC'}
+              </strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Crecimiento Ventas (QoQ):</span>

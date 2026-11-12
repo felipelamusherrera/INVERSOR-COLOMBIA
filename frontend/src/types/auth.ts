@@ -44,3 +44,4 @@ export interface AuthContextType {
   refreshProfile: () => Promise<void>;
   setIsPasswordRecoveryMode: (mode: boolean) => void;
 }
+
