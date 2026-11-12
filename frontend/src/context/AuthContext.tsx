@@ -27,8 +27,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (data) {
         const prof = data as UserProfile;
-        // Asignación de fallback por seguridad si coincide con el correo administrador maestro
-        if (userEmail && userEmail.toLowerCase() === 'neuronata25@gmail.com' && prof.role !== 'admin') {
+        // Asignación de fallback por seguridad si coincide con los correos administradores maestros
+        if (userEmail && ['neuronata25@gmail.com', 'felipelamusherrera@gmail.com'].includes(userEmail.toLowerCase()) && prof.role !== 'admin') {
           prof.role = 'admin';
         }
         setProfile(prof);
@@ -202,9 +202,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     user && (user.email_confirmed_at || profile?.email_confirmed_at)
   );
 
-  // Rol Administrador: verificado en profile.role === 'admin' o correo maestro neuronata25@gmail.com
+  // Rol Administrador: verificado en profile.role === 'admin' o correos maestros autorizados
   const isAdmin = Boolean(
-    profile?.role === 'admin' || user?.email?.toLowerCase() === 'neuronata25@gmail.com'
+    profile?.role === 'admin' || ['neuronata25@gmail.com', 'felipelamusherrera@gmail.com'].includes(user?.email?.toLowerCase() || '')
   );
 
   return (
