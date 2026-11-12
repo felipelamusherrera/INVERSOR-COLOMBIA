@@ -119,6 +119,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         email: data.email.trim().toLowerCase(),
         password: data.password,
         options: {
+          emailRedirectTo: window.location.origin,
           data: {
             full_name: data.fullName.trim(),
             document_type: data.documentType,
@@ -184,7 +185,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const { error } = await supabase.auth.resend({
         type: 'signup',
-        email: email.trim().toLowerCase()
+        email: email.trim().toLowerCase(),
+        options: {
+          emailRedirectTo: window.location.origin
+        }
       });
       return { error };
     } catch (err: any) {
@@ -234,3 +238,4 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
+
