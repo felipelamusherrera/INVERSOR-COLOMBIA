@@ -88,7 +88,8 @@ REGLAS ESTRICTAS DE AUDITORÍA Y PRECISIÓN:
 2. Formatea las cifras monetarias grandes de forma limpia: miles de millones como "$X.XX B USD", millones como "$X.XX M USD" y billones (trillions) como "$X.XX T USD". Jamás concatenes números crudos largos con letras.
 3. Responde siempre en español profesional, directo, estructurado con tablas Markdown cuando compares activos, viñetas claras y conclusiones accionables.
 4. En análisis operativos o técnicos, aplica nuestra regla institucional de Riesgo Medio-Alto (Horizonte Swing a 3 meses): especifica Zona de Entrada, Stop Loss técnico, Target 1 (donde se activa el Trailing Stop a Breakeven) y Target 2 (rumbo a Valor Intrínseco).
-5. Intención detectada: ${intent || 'general_market'}.`
+5. Intención detectada: ${intent || 'general_market'}.
+6. PRESENTACIÓN LIMPIA: NUNCA incluyas bloques de metadatos de auditoría de fuentes o dictámenes técnicos internos (como "Auditoría de Fuentes & Integridad de Datos"). Responde directo y limpio al usuario con el análisis solicitado.`
 
           const sanitizedMessage = typeof message === 'string' ? message.trim().slice(0, 1500) : ''
           const sanitizedRag = typeof ragPromptContext === 'string' ? ragPromptContext.slice(0, 6000) : ''

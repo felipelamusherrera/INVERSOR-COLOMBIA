@@ -348,6 +348,10 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
         screenerUIFilters: response.screenerUIFilters,
       };
 
+      if (response.ragContextSummary?.tickersAnalyzed?.[0]) {
+        setContextTicker(response.ragContextSummary.tickersAnalyzed[0]);
+      }
+
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err) {
       console.error('Error en consulta al Agente Inversor IA:', err);
@@ -490,8 +494,22 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
     });
   };
 
+  // Limpia los bloques de auditoría técnica interna para que nunca sean mostrados al usuario
+  const cleanUserFacingContent = (raw: string): string => {
+    if (!raw) return '';
+    let text = raw;
+    text = text.replace(/\n*---\s*\n+####\s*🛡️\s*Auditoría de Fuentes[\s\S]*?(?=\n###|\n##|$)/gi, '');
+    text = text.replace(/####\s*🛡️\s*Auditoría de Fuentes[\s\S]*?(?=\n###|\n##|$)/gi, '');
+    text = text.replace(/🛡️\s*Auditoría de Fuentes[\s\S]*?(?=\n###|\n##|$)/gi, '');
+    text = text.replace(/\*{1,2}Dictamen de Auditoría\*{1,2}:[\s\S]*?(?=\n###|\n##|$)/gi, '');
+    text = text.replace(/\*{1,2}AUDIT STATUS\*{1,2}:?[\s\S]*?(?=\n###|\n##|$)/gi, '');
+    text = text.replace(/\n*---\s*$/g, '');
+    return text.trim();
+  };
+
   const renderMarkdownContent = (content: string) => {
-    const lines = content.split('\n');
+    const cleaned = cleanUserFacingContent(content);
+    const lines = cleaned.split('\n');
     const elements: React.ReactNode[] = [];
     let i = 0;
 
@@ -619,40 +637,16 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
         continue;
       }
 
-      if (line.startsWith('#### 🛡️ Auditoría de Fuentes')) {
-        const auditLines: string[] = [];
+      // Ocultar bloques de auditoría técnica interna (el usuario no debe verlos)
+      if (
+        line.startsWith('#### 🛡️ Auditoría de Fuentes') ||
+        line.toLowerCase().includes('auditoría de fuentes') ||
+        line.toLowerCase().includes('audit status: approved')
+      ) {
         i++;
         while (i < lines.length && (lines[i].trim().startsWith('* ') || lines[i].trim().startsWith('- ') || lines[i].trim() === '')) {
-          if (lines[i].trim()) auditLines.push(lines[i].trim().replace(/^[\*\-]\s+/, ''));
           i++;
         }
-        elements.push(
-          <div
-            key={`audit-box-${i}`}
-            style={{
-              marginTop: '12px',
-              padding: '12px 14px',
-              borderRadius: '8px',
-              background: 'rgba(16, 185, 129, 0.08)',
-              border: '1px solid rgba(16, 185, 129, 0.35)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-              <ShieldCheck size={15} color="#10b981" />
-              <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                Auditoría de Fuentes & Integridad de Datos (Estándar auditor-inversor)
-              </span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '0.75rem', color: '#cbd5e1' }}>
-              {auditLines.map((al, alIdx) => (
-                <div key={alIdx} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', lineHeight: 1.5 }}>
-                  <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
-                  <div style={{ flex: 1 }}>{renderFormattedInline(al)}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
         continue;
       }
 

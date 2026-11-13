@@ -134,7 +134,7 @@ REGLAS ESTRICTAS DE AUDITORÍA Y PRECISIÓN (Pauta auditor-inversor):
 3. Responde siempre en español profesional, directo, estructurado con tablas Markdown cuando compares activos, viñetas claras y conclusiones accionables.
 4. En análisis operativos o técnicos, aplica nuestra regla institucional de Riesgo Medio-Alto (Horizonte Swing a 3 meses): especifica Zona de Entrada, Stop Loss técnico, Target 1 (donde se activa el Trailing Stop a Breakeven) y Target 2 (rumbo a Valor Intrínseco).
 5. Intención detectada: ${intent || 'general_market'}.
-6. AUDITORÍA OBLIGATORIA DE FUENTES: Finaliza siempre con el bloque "Auditoría de Fuentes & Integridad de Datos (Estándar auditor-inversor)" con el Ticker, Compañía, Sector real, ETF sectorial verificado (XLK Tecnología, XLV Salud, etc.), corte de Supabase y sello "AUDIT STATUS: APPROVED BY AUDITOR_INVERSOR".`;
+6. REGLA ESTRICTA DE PRESENTACIÓN: NO incluyas bloques de metadatos de auditoría de fuentes ni dictámenes técnicos internos (como "Auditoría de Fuentes & Integridad de Datos" o "AUDIT STATUS"). Responde directo y limpio al usuario con el análisis solicitado.`;
 
     // 1.3 Historial reciente formateado para Gemini API
     const recentHistory = conversationHistory.slice(-4).map((m) => ({

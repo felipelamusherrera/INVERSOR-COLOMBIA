@@ -48,6 +48,7 @@ const COMPANY_NAME_ALIASES: Record<string, string> = {
   visa: 'V',
   sandisk: 'SNDK',
   micron: 'MU',
+  'micron technology': 'MU',
   amd: 'AMD',
   netflix: 'NFLX',
   palantir: 'PLTR',
@@ -64,6 +65,11 @@ const COMPANY_NAME_ALIASES: Record<string, string> = {
   intel: 'INTC',
   taiwan: 'TSM',
   tsmc: 'TSM',
+  pinterest: 'PINS',
+  pins: 'PINS',
+  fico: 'FICO',
+  'fair isaac': 'FICO',
+  'fair-isaac': 'FICO',
 };
 
 /**
@@ -165,37 +171,15 @@ export function extractTickersFromMessage(
   const result: string[] = [];
   const found = new Set<string>();
   const validTickers = new Set(universe.map((s) => s.ticker.toUpperCase()));
-
   const normalizedActiveTicker = activeTicker ? activeTicker.trim().toUpperCase() : '';
 
-  // 1) Si activeTicker está presente y es mencionado explícitamente en el mensaje:
-  if (normalizedActiveTicker && validTickers.has(normalizedActiveTicker)) {
-    const activeRegex = new RegExp(`\\b${normalizedActiveTicker}\\b`, 'i');
-    if (activeRegex.test(message)) {
-      result.push(normalizedActiveTicker);
-      found.add(normalizedActiveTicker);
-    }
-  }
-
-  // 2) Buscar por alias de nombres de compañías (ej. Sandisk -> SNDK, Nvidia -> NVDA, Western Digital -> WDC)
-  const lowerMsg = message.toLowerCase();
-  for (const [alias, mappedTicker] of Object.entries(COMPANY_NAME_ALIASES)) {
-    const regex = new RegExp(`\\b${alias}\\b`, 'i');
-    if (regex.test(lowerMsg)) {
-      if (!found.has(mappedTicker) && validTickers.has(mappedTicker)) {
-        result.push(mappedTicker);
-        found.add(mappedTicker);
-      }
-    }
-  }
-
-  // 3) Stopwords completas en español e inglés para evitar colisiones con palabras gramaticales o financieras
+  // 1) Stopwords completas en español e inglés para evitar colisiones con palabras gramaticales o financieras
   const stopWords = new Set([
     'A', 'DE', 'EL', 'EN', 'ES', 'AL', 'LA', 'LO', 'LE', 'LOS', 'LAS', 'UN', 'UNA', 'UNO', 'UNOS', 'UNAS',
     'O', 'Y', 'E', 'NI', 'QUE', 'DEL', 'POR', 'PARA', 'CON', 'SIN', 'SOBRE', 'ENTRE', 'HACIA', 'DESDE', 'HASTA',
     'SE', 'SI', 'NO', 'TE', 'ME', 'MI', 'TU', 'SU', 'SUS', 'NOS', 'LES', 'YA', 'DA', 'VA', 'IR', 'RE', 'DO', 'FA',
     'SO', 'IT', 'ON', 'OR', 'AS', 'AT', 'BY', 'IF', 'IN', 'IS', 'TO', 'UP', 'US', 'BE', 'AM', 'AN', 'HE', 'WE',
-    'MY', 'DO', 'GO', 'OF', 'ALL', 'CAN', 'NOW', 'SEE', 'OUT', 'NET', 'MET', 'LOW', 'BUY', 'SELL', 'HOLD',
+    'MY', 'GO', 'OF', 'ALL', 'CAN', 'NOW', 'SEE', 'OUT', 'NET', 'MET', 'LOW', 'BUY', 'SELL', 'HOLD',
     'ESTE', 'ESTA', 'ESTOS', 'ESTAS', 'ESE', 'ESA', 'ESOS', 'ESAS', 'AQUEL', 'AQUELLA', 'SON', 'HAY', 'HOY',
     'MES', 'AÑO', 'VER', 'DAR', 'MUY', 'BIEN', 'MAL', 'SER', 'MAS', 'PERO', 'COMO', 'CUAL', 'QUIEN',
     'USD', 'ETF', 'ROE', 'ROA', 'PEG', 'EPS', 'FCF', 'RSI', 'SMA', 'ATH', 'YOY', 'QOQ', 'TTM', 'CAGR',
@@ -205,10 +189,11 @@ export function extractTickersFromMessage(
     'PARES', 'ACCION', 'ACCIONES', 'BONO', 'TASAS', 'BANCO', 'CARTERA', 'PORTAFOLIO', 'BALANCES', 'INGRESOS',
     'BENEFICIO', 'ACTIVO', 'ACTIVOS', 'PASIVO', 'PASIVOS', 'PATRIMONIO', 'FLUJO', 'CAJA', 'LIBRE', 'MARGEN',
     'SOLVENCIA', 'LIQUIDEZ', 'RATIO', 'VENTAJAS', 'COMPETENCIA', 'AMENAZAS', 'FORTALEZAS', 'DEBILIDADES',
-    'OPORTUNIDADES', 'CALIDAD', 'CRECIMIENTO', 'DIVIDENDO', 'DIVIDENDOS', 'ANALISIS', 'INFORME', 'ESTRUCTURA'
+    'OPORTUNIDADES', 'CALIDAD', 'CRECIMIENTO', 'DIVIDENDO', 'DIVIDENDOS', 'ANALISIS', 'INFORME', 'ESTRUCTURA',
+    'STOP', 'LOSS', 'TARGET', 'TARGETS', 'ENTRY', 'EXIT', 'SWING'
   ]);
 
-  // 4) Tickers explícitos con prefijo de dólar (ej. $SNDK, $NVDA, $A, $DE)
+  // 2) Tickers explícitos con prefijo de dólar (ej. $PINS, $SNDK, $NVDA, $A, $DE)
   const dollarTickers = message.match(/\$([A-Za-z]{1,5}(?:-[A-Za-z])?)\b/g) || [];
   for (const dt of dollarTickers) {
     const raw = dt.replace('$', '').toUpperCase();
@@ -218,8 +203,8 @@ export function extractTickersFromMessage(
     }
   }
 
-  // 5) Tickers explícitos precedidos por palabras clave (ej. "ticker SNDK", "acción WDC", "empresa AAPL")
-  const keywordMatches = message.match(/(?:ticker|acci[oó]n|empresa|compa[ñn][ií]a|s[ií]mbolo)\s+([A-Za-z]{1,5}(?:-[A-Za-z])?)\b/gi) || [];
+  // 3) Tickers explícitos precedidos por palabras clave (ej. "ticker PINS", "ticket PINS", "acción WDC", "empresa AAPL")
+  const keywordMatches = message.match(/(?:ticker|ticket|acci[oó]n|empresa|compa[ñn][ií]a|s[ií]mbolo)\s+([A-Za-z]{1,5}(?:-[A-Za-z])?)\b/gi) || [];
   for (const km of keywordMatches) {
     const parts = km.trim().split(/\s+/);
     const candidate = parts[parts.length - 1].toUpperCase();
@@ -229,22 +214,45 @@ export function extractTickersFromMessage(
     }
   }
 
-  // 6) Tickers en mayúsculas de 3 a 5 letras en el texto que no sean stopwords (ej. SNDK, NVDA, TSLA, MSFT)
-  const tokens = message.match(/\b[A-Za-z]{1,5}(?:-[A-Za-z])?\b/g) || [];
-  for (const token of tokens) {
-    const upper = token.toUpperCase();
-    if (stopWords.has(upper)) continue;
+  // 4) Buscar por alias de nombres de compañías (ej. Pinterest -> PINS, Nvidia -> NVDA, Western Digital -> WDC)
+  const lowerMsg = message.toLowerCase();
+  for (const [alias, mappedTicker] of Object.entries(COMPANY_NAME_ALIASES)) {
+    const regex = new RegExp(`(^|[^\\p{L}\\p{N}])${alias}([^\\p{L}\\p{N}]|$)`, 'iu');
+    if (regex.test(lowerMsg)) {
+      if (!found.has(mappedTicker) && validTickers.has(mappedTicker)) {
+        result.push(mappedTicker);
+        found.add(mappedTicker);
+      }
+    }
+  }
 
-    // Si el token tiene 1 o 2 letras (como A, DE, EL, V, T), EXIGIR que haya sido escrito originalmente en MAYÚSCULAS
-    // y que coincida exactamente con activeTicker para evitar falsos positivos
-    if (token.length <= 2) {
-      if (token !== token.toUpperCase()) continue;
+  // 5) Tickers en mayúsculas en el texto (usando palabras Unicode \p{L} para evitar que palabras con tilde como "gráfico" se partan en "gr" y "fico")
+  const unicodeWords = message.match(/[\p{L}\p{N}-]+/gu) || [];
+  for (const word of unicodeWords) {
+    const upper = word.toUpperCase();
+    if (stopWords.has(upper)) continue;
+    if (word.length > 5) continue;
+
+    // Si tiene 1 o 2 letras (como A, DE, EL, V, T), EXIGIR que haya sido escrito en MAYÚSCULAS y coincida con activeTicker
+    if (word.length <= 2) {
+      if (word !== upper) continue;
       if (upper !== normalizedActiveTicker) continue;
     }
 
-    if (validTickers.has(upper) && !found.has(upper)) {
+    // Para 3 a 5 letras: exigir que la palabra haya sido escrita en MAYÚSCULAS en el mensaje original (ej. PINS, NVDA, TSLA)
+    // Esto previene que palabras en minúsculas en español o fragmentos de palabras con tilde sean interpretados erróneamente como tickers
+    if (word === upper && validTickers.has(upper) && !found.has(upper)) {
       result.push(upper);
       found.add(upper);
+    }
+  }
+
+  // 6) Si activeTicker está presente y fue mencionado exactamente en mayúsculas en el mensaje
+  if (normalizedActiveTicker && validTickers.has(normalizedActiveTicker) && !found.has(normalizedActiveTicker)) {
+    const activeRegex = new RegExp(`(^|[^\\p{L}\\p{N}])${normalizedActiveTicker}([^\\p{L}\\p{N}]|$)`, 'u');
+    if (activeRegex.test(message)) {
+      result.push(normalizedActiveTicker);
+      found.add(normalizedActiveTicker);
     }
   }
 
@@ -959,42 +967,22 @@ ${posLines}
 
 /**
  * Genera el bloque de Auditoría de Fuentes y Trazabilidad de Datos (Estándar auditor-inversor)
+ * Nota: El usuario solicitó no mostrar bloques de auditoría técnica interna en las respuestas
  */
 export function formatSourceAuditBlock(
-  stock: StockRecord,
-  benchmark?: AgentSectorBenchmark | null,
-  snapshotDate?: string
+  _stock?: StockRecord,
+  _benchmark?: AgentSectorBenchmark | null,
+  _snapshotDate?: string
 ): string {
-  const dateStr = snapshotDate || new Date().toISOString().split('T')[0];
-  const sectorKey = stock.sector || '';
-  const etfTicker = benchmark?.etfTicker || (sectorKey ? SECTOR_ETF_MAP[sectorKey]?.ticker : undefined) || 'SPY';
-  const etfName = benchmark?.etfName || (sectorKey ? SECTOR_ETF_MAP[sectorKey]?.name : undefined) || 'SPDR S&P 500 ETF';
-
-  return `
----
-#### 🛡️ Auditoría de Fuentes & Integridad de Datos (Estándar \`auditor-inversor\`)
-* **Entidad Auditada**: **${stock.ticker}** (${stock.company}) · **Sector**: ${stock.sector} · **Industria**: ${stock.industry}
-* **ETF Sectorial Oficial Verificado**: **${etfTicker}** (${etfName})
-* **Base de Datos y Snapshot**: **Supabase \`stocks_finviz\`** · Corte: **${dateStr}** (Sesión en vivo)
-* **Fuentes Primarias Reguladas**:
-  * [SEC EDGAR (Reportes 10-Q / 10-K)](https://www.sec.gov/edgar/searchedgar/companysearch)
-  * [Finviz Screener Institucional](https://finviz.com/quote.ashx?t=${stock.ticker})
-  * [NYSE / NASDAQ Cotizaciones en Tiempo Real](https://www.google.com/finance/quote/${stock.ticker}:NASDAQ)
-* **Dictamen de Auditoría**: **\`AUDIT STATUS: APPROVED BY AUDITOR_INVERSOR\`** (Consistencia cruzada validada sin alucinaciones).`;
+  return '';
 }
 
 /**
  * Genera el bloque de Auditoría para el Screener Cuantitativo IA
+ * Nota: El usuario solicitó no mostrar bloques de auditoría técnica interna en las respuestas
  */
-export function formatScreenerAuditBlock(snapshotDate?: string, matchCount?: number): string {
-  const dateStr = snapshotDate || new Date().toISOString().split('T')[0];
-  return `
----
-#### 🛡️ Auditoría de Fuentes & Integridad de Datos (Estándar \`auditor-inversor\`)
-* **Universo Evaluado**: +2.500 acciones cotizadas en NYSE / NASDAQ sincronizadas en Supabase
-* **Base de Datos y Snapshot**: **Supabase \`stocks_finviz\`** · Corte: **${dateStr}** (Sesión en vivo)
-* **Criterios Institucionales Verificados**: Filtros de rentabilidad (ROIC), margen neto y escala de balance sin alucinación.
-* **Dictamen de Auditoría**: **\`AUDIT STATUS: APPROVED BY AUDITOR_INVERSOR\`** (${matchCount ?? 0} acciones verificadas).`;
+export function formatScreenerAuditBlock(_snapshotDate?: string, _matchCount?: number): string {
+  return '';
 }
 
 /**
@@ -1066,16 +1054,14 @@ ${sectorBreakdown}
         ? '⚠️ **Alerta de Liquidez Baja**: Tu efectivo disponible es inferior al 10%. Considera tomar ganancias parciales en posiciones con P&L > +10% y subir el Stop Loss a *Breakeven*.'
         : '✅ **Colchón de Liquidez Saludable**: Cuentas con liquidez suficiente para aprovechar retrocesos hacia la SMA 50.'
     }
-* **Regla Institucional de Gestión**: En toda posición que supere **+9.5% (Target 1)**, ajusta inmediatamente el **Trailing Stop a Breakeven** para blindar el capital rumbo al **Target 2**.
-
-${formatScreenerAuditBlock(ctx.snapshotDate, port.positions.length)}`;
+* **Regla Institucional de Gestión**: En toda posición que supere **+9.5% (Target 1)**, ajusta inmediatamente el **Trailing Stop a Breakeven** para blindar el capital rumbo al **Target 2**.`;
   }
 
   // Caso B: Screener Conversacional IA
   if (intent === 'screener_query') {
     const matches = ctx.screenerMatches;
     if (matches.length === 0) {
-      return `### 🔎 Screener Cuantitativo IA\n\nNo se encontraron acciones que cumplan simultáneamente con todos los parámetros extremos solicitados en la sesión actual (**${ctx.snapshotDate}**).\n\n**Sugerencia**: Prueba relajando el filtro de valoración (ej. *PEG < 2.0* o *ROIC > 15%*) para ampliar el radar institucional.\n\n${formatScreenerAuditBlock(ctx.snapshotDate, 0)}`;
+      return `### 🔎 Screener Cuantitativo IA\n\nNo se encontraron acciones que cumplan simultáneamente con todos los parámetros extremos solicitados en la sesión actual (**${ctx.snapshotDate}**).\n\n**Sugerencia**: Prueba relajando el filtro de valoración (ej. *PEG < 2.0* o *ROIC > 15%*) para ampliar el radar institucional.`;
     }
 
     const filterBadges = Object.entries(ctx.screenerAppliedFilters || {})
@@ -1116,9 +1102,7 @@ ${tableRows}
     }%**, situándose en el decil superior de su industria (**${topPick.industry}**).
 * **Valoración**: Cotiza a un múltiplo Forward P/E de **${
       topPick.forward_pe ?? topPick.pe ?? 'N/A'
-    }x** frente a un precio objetivo institucional de **${targetPriceStr}**.
-
-${formatScreenerAuditBlock(ctx.snapshotDate, matches.length)}`;
+    }x** frente a un precio objetivo institucional de **${targetPriceStr}**.`;
   }
 
   // Si no hay acción primaria identificada para las demás intenciones
@@ -1179,9 +1163,7 @@ ${
     }x**) frente al promedio de **${b?.avgPe ?? 24.5}x** de su sector en **${b?.etfTicker || 'SPY'}**.
 3. **Capacidad de Generación de Caja**: Con ventas anuales de **${salesFormatted}** y un Flujo de Caja Libre estimado en **${fcfFormatted}**, mantiene un margen neto del **${
       s.profit_m ?? 'N/A'
-    }%** y solvencia Deuda/Equity de **${s.debt_eq ?? 'N/A'}x**.
-
-${formatSourceAuditBlock(s, b, ctx.snapshotDate)}`;
+    }%** y solvencia Deuda/Equity de **${s.debt_eq ?? 'N/A'}x**.`;
   }
 
   // Caso D: Análisis Técnico de Gráfico & Niveles Operativos (Fase 3: Serie de Velas 6 Meses)
@@ -1218,15 +1200,13 @@ ${formatSourceAuditBlock(s, b, ctx.snapshotDate)}`;
 | 🎯 **Zona de Entrada** | **$${t.entryZone.toFixed(2)} USD** | Base | Entrada escalonada con confirmación sobre soporte |
 | 🛡️ **Stop Loss Técnico** | **$${t.stopLoss.toFixed(2)} USD** | **${t.stopLossPct}%** | Invalidación bajo soporte de volatilidad (2.1x ATR) |
 | 🚀 **Target 1 (Toma Parcial)** | **$${t.target1TrailingBreakeven.toFixed(2)} USD** | **+${t.target1Pct}%** | **Activar Trailing Stop a Breakeven ($${t.entryZone.toFixed(2)})** · Ratio R:R **${t.riskRewardT1}:1** |
-| 🏆 **Target 2 (Valor Intrínseco)** | **$${t.target2Intrinsic.toFixed(2)} USD** | **+${t.target2Pct}%** | Objetivo fundamental de consenso · Ratio R:R **${t.riskRewardT2}:1** |
-
-${formatSourceAuditBlock(s, b, ctx.snapshotDate)}`;
+| 🏆 **Target 2 (Valor Intrínseco)** | **$${t.target2Intrinsic.toFixed(2)} USD** | **+${t.target2Pct}%** | Objetivo fundamental de consenso · Ratio R:R **${t.riskRewardT2}:1** |`;
   }
 
   // Caso E: Matriz DAFO / SWOT y Foso Económico (Moat)
   if (intent === 'swot_moat') {
     const isLowDebt = (s.debt_eq ?? 0.5) < 1.0;
-    return `### 🛡️ Auditoría de Foso Económico (Moat), DAFO y Salud de Balance: **${s.ticker}**
+    return `### 🛡️ Diagnóstico de Foso Económico (Moat), DAFO y Salud de Balance: **${s.ticker}**
 
 #### 1. Evaluación del Foso Económico (*Economic Moat*)
 * **Rentabilidad sobre Capital (ROIC)**: **${s.roic ?? 'N/A'}%** vs. **${b?.avgRoic ?? 14.8}%** del sector **${
@@ -1260,9 +1240,7 @@ ${formatSourceAuditBlock(s, b, ctx.snapshotDate)}`;
   }** y sensibilidad macroeconómica del ETF **${b?.etfTicker || 'SPY'}**.
 
 #### 3. Recompras vs. Dilución y Estructura de Capital
-* Con participación institucional del **${s.inst_own ?? 78.5}%** y un flujo de caja libre de **${fcfFormatted}**, la compañía cuenta con holgura financiera para sostener programas de recompra de acciones y amortización de pasivos sin riesgo de dilución accionaria.
-
-${formatSourceAuditBlock(s, b, ctx.snapshotDate)}`;
+* Con participación institucional del **${s.inst_own ?? 78.5}%** y un flujo de caja libre de **${fcfFormatted}**, la compañía cuenta con holgura financiera para sostener programas de recompra de acciones y amortización de pasivos sin riesgo de dilución accionaria.`;
   }
 
   // Caso F (Por defecto): Diagnóstico Integral de la Acción (Informe Ejecutivo Institucional)
@@ -1299,9 +1277,7 @@ ${
 * 🚀 **Target 1 (Mover Stop a Breakeven)**: **$${t.target1TrailingBreakeven.toFixed(2)} USD (+${t.target1Pct}%)**
 * 🏆 **Target 2 (Valor Intrínseco)**: **$${t.target2Intrinsic.toFixed(2)} USD (+${t.target2Pct}% · R:R ${t.riskRewardT2}:1)**`
     : '* Datos técnicos en sincronización.'
-}
-
-${formatSourceAuditBlock(s, b, ctx.snapshotDate)}`;
+}`;
 }
 
 /**
