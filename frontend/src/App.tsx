@@ -12,7 +12,7 @@ import { FinvizMap } from './components/FinvizMap';
 import { StrategyAIModule } from './components/StrategyAIModule';
 import { GlobalAIAgentDrawer } from './components/GlobalAIAgentDrawer';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider, useAuth, OPEN_TABS_SESSION_STORAGE_KEY } from './context/AuthContext';
 import { AuthView } from './components/AuthView';
 import { UserAdminModule } from './components/UserAdminModule';
 import type { AgentIntentType, ScreenerUIFilterPayload } from './types/agent';
@@ -57,9 +57,57 @@ function AppContent() {
     }
   }, [currentTab, isAdmin]);
 
-  // Sistema de Pestañas Múltiples de Acciones (No cierra la ventana de la acción anterior)
-  const [openStockTabs, setOpenStockTabs] = useState<string[]>(['MU']);
-  const [activeStockTicker, setActiveStockTicker] = useState<string | null>('MU');
+  // Sistema de Pestañas Múltiples de Acciones (Sin pestaña inicial abierta por defecto)
+  const [openStockTabs, setOpenStockTabs] = useState<string[]>(() => {
+    try {
+      const saved = sessionStorage.getItem(OPEN_TABS_SESSION_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.openStockTabs)) {
+          return parsed.openStockTabs;
+        }
+      }
+    } catch {
+      // noop
+    }
+    return [];
+  });
+  const [activeStockTicker, setActiveStockTicker] = useState<string | null>(() => {
+    try {
+      const saved = sessionStorage.getItem(OPEN_TABS_SESSION_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return typeof parsed.activeStockTicker === 'string' ? parsed.activeStockTicker : null;
+      }
+    } catch {
+      // noop
+    }
+    return null;
+  });
+
+  // Persistir pestañas abiertas mientras la sesión esté activa
+  useEffect(() => {
+    if (authLoading || !user) return;
+    try {
+      sessionStorage.setItem(
+        OPEN_TABS_SESSION_STORAGE_KEY,
+        JSON.stringify({ openStockTabs, activeStockTicker })
+      );
+    } catch (err) {
+      console.warn('Error guardando pestañas de sesión:', err);
+    }
+  }, [authLoading, user, openStockTabs, activeStockTicker]);
+
+  // Reiniciar pestañas abiertas y vista inicial al cerrar la sesión (manual o por inactividad)
+  useEffect(() => {
+    if (!authLoading && !user) {
+      setOpenStockTabs([]);
+      setActiveStockTicker(null);
+      setCurrentTab('dashboard');
+      setIsAgentDrawerOpen(false);
+      setExternalScreenerFilters(null);
+    }
+  }, [authLoading, user]);
 
   // Estado del Drawer Flotante Global del Agente Inversor IA (Fase 2 & Fase 3)
   const [isAgentDrawerOpen, setIsAgentDrawerOpen] = useState(false);
@@ -224,9 +272,17 @@ function AppContent() {
     }
   };
 
-  // Acción activa actual
-  const currentActiveStock = stocks.find(s => s.ticker === activeStockTicker) || 
-    (stocks.length > 0 ? stocks[0] : null);
+  // Acción activa actual (null si no hay pestaña de acción abierta)
+  const currentActiveStock = activeStockTicker
+    ? (stocks.find(s => s.ticker === activeStockTicker) || null)
+    : null;
+
+  // Evitar permanecer en vista detalle si no hay acción activa abierta
+  useEffect(() => {
+    if (currentTab === 'detail' && !activeStockTicker) {
+      setCurrentTab('screener');
+    }
+  }, [currentTab, activeStockTicker]);
 
   // 1. PANTALLA DE CARGA DE SESIÓN
   if (authLoading) {
@@ -432,16 +488,17 @@ function AppContent() {
               />
             )}
 
-            {/* 2. Screener Acciones Unificado (Finviz Filters + Screener Quant Styling + Fase 3 Natural Language Filter) */}
-            {(currentTab === 'screener' || currentTab === 'finviz-screener') && (
+            {/* 2. Screener Acciones Unificado (Mantiene estado de filtros y orden durante la sesión) */}
+            <div style={{ display: (currentTab === 'screener' || currentTab === 'finviz-screener') ? 'block' : 'none' }}>
               <StockScreener
+                key={user.id}
                 stocks={stocks}
                 onSelectStock={handleSelectStock}
                 selectedStock={currentActiveStock}
                 externalAIFilters={externalScreenerFilters}
                 onOpenAgentDrawerWithQuery={(query: string) => handleTriggerAgentPrompt(query, 'screener_query')}
               />
-            )}
+            </div>
 
             {/* 3. Maps Heatmap / Matriz Sectorial */}
             {currentTab === 'maps' && (

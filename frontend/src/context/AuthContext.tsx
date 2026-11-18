@@ -1,7 +1,31 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
+import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
 import type { UserProfile, RegisterFormData, AuthContextType } from '../types/auth';
+
+export const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutos de inactividad
+export const LAST_ACTIVITY_STORAGE_KEY = 'inversor_colombia_last_activity_ts';
+export const SCREENER_SESSION_STORAGE_KEY = 'inversor_colombia_screener_session_v1';
+export const OPEN_TABS_SESSION_STORAGE_KEY = 'inversor_colombia_open_tabs_session_v1';
+
+/**
+ * Limpia la marca de tiempo de actividad y los estados efímeros de sesión (filtros y pestañas abiertas)
+ */
+export const clearEphemeralSessionState = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(LAST_ACTIVITY_STORAGE_KEY);
+  } catch (err) {
+    console.warn('Error al limpiar marca de actividad:', err);
+  }
+  try {
+    sessionStorage.removeItem(SCREENER_SESSION_STORAGE_KEY);
+    sessionStorage.removeItem(OPEN_TABS_SESSION_STORAGE_KEY);
+  } catch (err) {
+    console.warn('Error al limpiar sessionStorage:', err);
+  }
+};
 
 /**
  * Limpia los hashes y parámetros de URL generados por el flujo de autenticación de Supabase
@@ -56,6 +80,28 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isPasswordRecoveryMode, setIsPasswordRecoveryMode] = useState(false);
+  const isExplicitSignInRef = React.useRef(false);
+  const inactivitySignOutTriggeredRef = React.useRef(false);
+
+  const isSessionInactive = useCallback((sessionUser: User): boolean => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const rawTs = localStorage.getItem(LAST_ACTIVITY_STORAGE_KEY);
+      const savedTs = rawTs ? Number(rawTs) : 0;
+      if (savedTs > 0 && !Number.isNaN(savedTs)) {
+        return Date.now() - savedTs >= INACTIVITY_TIMEOUT_MS;
+      }
+      if (sessionUser.last_sign_in_at) {
+        const signInTs = new Date(sessionUser.last_sign_in_at).getTime();
+        if (!Number.isNaN(signInTs) && Date.now() - signInTs >= INACTIVITY_TIMEOUT_MS) {
+          return true;
+        }
+      }
+    } catch (err) {
+      console.warn('Error comprobando inactividad de sesión:', err);
+    }
+    return false;
+  }, []);
 
   // Cargar perfil desde public.profiles
   const fetchProfile = useCallback(async (userId: string, userEmail?: string): Promise<UserProfile | null> => {
@@ -92,8 +138,41 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [user, fetchProfile]);
 
+  // Cerrar Sesión (manual o automática por inactividad)
+  const signOut = useCallback(async () => {
+    try {
+      clearEphemeralSessionState();
+      setUser(null);
+      setProfile(null);
+      setIsPasswordRecoveryMode(false);
+      cleanAuthUrl();
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Error signing out:', err);
+    }
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
+
+    const handleInactivityRejection = async (showToastMessage: boolean) => {
+      const alreadyTriggered = inactivitySignOutTriggeredRef.current;
+      inactivitySignOutTriggeredRef.current = true;
+      clearEphemeralSessionState();
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn('Error cerrando sesión por inactividad:', err);
+      }
+      if (isMounted) {
+        setUser(null);
+        setProfile(null);
+        setIsPasswordRecoveryMode(false);
+      }
+      if (showToastMessage && !alreadyTriggered) {
+        toast.info('Tu sesión se cerró automáticamente tras 30 minutos de inactividad.');
+      }
+    };
 
     // 1. Obtener sesión activa al cargar
     async function initAuth() {
@@ -108,10 +187,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user && isMounted) {
+          if (!isRecoverySignal && isSessionInactive(session.user)) {
+            await handleInactivityRejection(true);
+            return;
+          }
+
+          inactivitySignOutTriggeredRef.current = false;
+          try {
+            localStorage.setItem(LAST_ACTIVITY_STORAGE_KEY, String(Date.now()));
+          } catch {
+            // noop
+          }
+
           setUser(session.user);
           const prof = await fetchProfile(session.user.id, session.user.email);
           if (prof?.status === 'suspended') {
             await supabase.auth.signOut();
+            clearEphemeralSessionState();
             if (isMounted) {
               setUser(null);
               setProfile(prof);
@@ -131,10 +223,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
 
+      const hash = window.location.hash || '';
+      const search = window.location.search || '';
+      const isRecoverySignal = hash.includes('type=recovery') || search.includes('type=recovery');
+
       if (event === 'PASSWORD_RECOVERY') {
         setIsPasswordRecoveryMode(true);
       } else if (event === 'SIGNED_IN') {
-        const hash = window.location.hash || '';
         if (!hash.includes('type=recovery')) {
           setIsPasswordRecoveryMode(false);
         }
@@ -143,14 +238,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         cleanAuthUrl();
       } else if (event === 'SIGNED_OUT') {
         setIsPasswordRecoveryMode(false);
+        clearEphemeralSessionState();
         cleanAuthUrl();
       }
 
       if (session?.user) {
+        if (
+          event !== 'PASSWORD_RECOVERY' &&
+          !isRecoverySignal &&
+          !isExplicitSignInRef.current &&
+          isSessionInactive(session.user)
+        ) {
+          await handleInactivityRejection(true);
+          if (isMounted) setLoading(false);
+          return;
+        }
+
+        try {
+          if (!localStorage.getItem(LAST_ACTIVITY_STORAGE_KEY)) {
+            localStorage.setItem(LAST_ACTIVITY_STORAGE_KEY, String(Date.now()));
+          }
+        } catch {
+          // noop
+        }
+
         setUser(session.user);
         const prof = await fetchProfile(session.user.id, session.user.email);
         if (prof?.status === 'suspended') {
           await supabase.auth.signOut();
+          clearEphemeralSessionState();
           if (isMounted) {
             setUser(null);
             setProfile(prof);
@@ -168,28 +284,104 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [fetchProfile]);
+  }, [fetchProfile, isSessionInactive]);
+
+  // 3. Vigilancia activa de inactividad de 30 minutos (incluye suspensión o apagado del equipo)
+  useEffect(() => {
+    if (!user) return;
+
+    const checkAndRecordActivity = (isUserInteraction: boolean) => {
+      if (typeof window === 'undefined') return;
+      try {
+        const rawTs = localStorage.getItem(LAST_ACTIVITY_STORAGE_KEY);
+        const lastTs = rawTs ? Number(rawTs) : 0;
+
+        // Verificar primero si ya expiró antes de actualizar el timestamp
+        if (lastTs > 0 && !Number.isNaN(lastTs) && Date.now() - lastTs >= INACTIVITY_TIMEOUT_MS) {
+          if (!inactivitySignOutTriggeredRef.current) {
+            inactivitySignOutTriggeredRef.current = true;
+            toast.info('Tu sesión ha expirado por 30 minutos de inactividad.');
+            void signOut();
+          }
+          return;
+        }
+
+        if (isUserInteraction && (!lastTs || Date.now() - lastTs > 5000)) {
+          localStorage.setItem(LAST_ACTIVITY_STORAGE_KEY, String(Date.now()));
+        }
+      } catch (err) {
+        console.warn('Error verificando inactividad:', err);
+      }
+    };
+
+    const onUserInteraction = () => checkAndRecordActivity(true);
+    const onWakeOrFocus = () => checkAndRecordActivity(false);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkAndRecordActivity(false);
+      }
+    };
+
+    const activityEvents: (keyof WindowEventMap)[] = [
+      'mousedown',
+      'mousemove',
+      'keydown',
+      'scroll',
+      'touchstart',
+      'click'
+    ];
+
+    activityEvents.forEach(evt => window.addEventListener(evt, onUserInteraction, { passive: true }));
+    window.addEventListener('focus', onWakeOrFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    const intervalId = window.setInterval(() => checkAndRecordActivity(false), 15000);
+
+    return () => {
+      activityEvents.forEach(evt => window.removeEventListener(evt, onUserInteraction));
+      window.removeEventListener('focus', onWakeOrFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.clearInterval(intervalId);
+    };
+  }, [user, signOut]);
 
   // Iniciar Sesión con email y contraseña
   const signIn = async (email: string, password: string) => {
+    isExplicitSignInRef.current = true;
+    inactivitySignOutTriggeredRef.current = false;
     try {
-      // Limpiar preventivamente cualquier estado residual o hash de recuperación
+      // Limpiar preventivamente cualquier estado residual, pestañas o hash de recuperación
       cleanAuthUrl();
+      clearEphemeralSessionState();
       setIsPasswordRecoveryMode(false);
+      try {
+        localStorage.setItem(LAST_ACTIVITY_STORAGE_KEY, String(Date.now()));
+      } catch {
+        // noop
+      }
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
         password
       });
 
-      if (error) return { error };
+      if (error) {
+        clearEphemeralSessionState();
+        return { error };
+      }
 
       if (data.user) {
+        try {
+          localStorage.setItem(LAST_ACTIVITY_STORAGE_KEY, String(Date.now()));
+        } catch {
+          // noop
+        }
         setIsPasswordRecoveryMode(false);
         setUser(data.user);
         const prof = await fetchProfile(data.user.id, data.user.email);
         if (prof?.status === 'suspended') {
           await supabase.auth.signOut();
+          clearEphemeralSessionState();
           setUser(null);
           setProfile(prof);
           return {
@@ -200,7 +392,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       return { error: null };
     } catch (err: any) {
+      clearEphemeralSessionState();
       return { error: err };
+    } finally {
+      isExplicitSignInRef.current = false;
     }
   };
 
@@ -231,19 +426,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { error: null, needsEmailConfirmation };
     } catch (err: any) {
       return { error: err };
-    }
-  };
-
-  // Cerrar Sesión
-  const signOut = async () => {
-    try {
-      await supabase.auth.signOut();
-      setUser(null);
-      setProfile(null);
-      setIsPasswordRecoveryMode(false);
-      cleanAuthUrl();
-    } catch (err) {
-      console.error('Error signing out:', err);
     }
   };
 

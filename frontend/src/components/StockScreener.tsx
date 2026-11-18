@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Download, 
-  Search, 
   Eye, 
   TrendingUp, 
   DollarSign, 
@@ -11,14 +10,15 @@ import {
   Bot,
   ArrowUp,
   ArrowDown,
-  ArrowUpDown,
   RotateCcw,
-  SlidersHorizontal,
   ChevronLeft,
   ChevronRight,
   Briefcase,
   Bookmark,
-  ExternalLink
+  ExternalLink,
+  Star,
+  Trash2,
+  Check
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { StockRecord } from '../types/stock';
@@ -26,8 +26,11 @@ import type { ScreenerUIFilterPayload } from '../types/agent';
 import { parseNaturalLanguageToScreenerFilters } from '../services/agentRagService';
 import { calculateFactorGrades } from '../utils/quantRatings';
 import { formatCurrencyUSD, formatPercentage, formatVolumeShares } from '../utils/formatters';
+import { SCREENER_SESSION_STORAGE_KEY } from '../context/AuthContext';
 import { AddPositionModal } from './AddPositionModal';
 import { AddToWatchlistModal } from './AddToWatchlistModal';
+
+const FAVORITE_VIEW_STORAGE_KEY = 'inversor_colombia_favorite_screener_view_v1';
 
 interface StockScreenerProps {
   stocks: StockRecord[];
@@ -41,6 +44,207 @@ export type SortField = keyof StockRecord | 'quant_rating';
 type FilterCategory = 'descriptive' | 'fundamental' | 'technical' | 'all';
 type TableView = 'custom' | 'overview' | 'valuation' | 'financial' | 'performance' | 'technical';
 
+export interface ScreenerViewConfig {
+  nlQuery: string;
+  appliedAISummary: string | null;
+  tickerQuery: string;
+  presetFilter: string;
+  sectorFilter: string;
+  industryFilter: string;
+  countryFilter: string;
+  marketCapFilter: string;
+  indexFilter: string;
+  peFilter: string;
+  forwardPeFilter: string;
+  pegFilter: string;
+  psFilter: string;
+  epsGrowthQtrFilter: string;
+  epsGrowthTtmFilter: string;
+  salesGrowthQtrFilter: string;
+  salesGrowthTtmFilter: string;
+  currentRatioFilter: string;
+  quickRatioFilter: string;
+  debtEquityFilter: string;
+  profitMarginFilter: string;
+  roicFilter: string;
+  rsiFilter: string;
+  sma20Filter: string;
+  sma50Filter: string;
+  sma200Filter: string;
+  changePctFilter: string;
+  activeCategory: FilterCategory;
+  tableView: TableView;
+  sortField: SortField;
+  sortAsc: boolean;
+  pageSize: number;
+  page: number;
+  savedAt?: string;
+}
+
+const DEFAULT_SCREENER_FILTERS = {
+  nlQuery: '',
+  appliedAISummary: null as string | null,
+  tickerQuery: '',
+  presetFilter: 'ALL',
+  sectorFilter: 'Any',
+  industryFilter: 'Any',
+  countryFilter: 'Any',
+  marketCapFilter: 'Any',
+  indexFilter: 'Any',
+  peFilter: 'Any',
+  forwardPeFilter: 'Any',
+  pegFilter: 'Any',
+  psFilter: 'Any',
+  epsGrowthQtrFilter: 'Any',
+  epsGrowthTtmFilter: 'Any',
+  salesGrowthQtrFilter: 'Any',
+  salesGrowthTtmFilter: 'Any',
+  currentRatioFilter: 'Any',
+  quickRatioFilter: 'Any',
+  debtEquityFilter: 'Any',
+  profitMarginFilter: 'Any',
+  roicFilter: 'Any',
+  rsiFilter: 'Any',
+  sma20Filter: 'Any',
+  sma50Filter: 'Any',
+  sma200Filter: 'Any',
+  changePctFilter: 'Any',
+};
+
+const DEFAULT_SCREENER_CONFIG: ScreenerViewConfig = {
+  ...DEFAULT_SCREENER_FILTERS,
+  activeCategory: 'fundamental',
+  tableView: 'custom',
+  sortField: 'market_cap',
+  sortAsc: false,
+  pageSize: 50,
+  page: 1,
+};
+
+const COUNTABLE_FILTER_KEYS = Object.keys(DEFAULT_SCREENER_FILTERS).filter(
+  (k) => k !== 'nlQuery' && k !== 'appliedAISummary'
+) as (keyof typeof DEFAULT_SCREENER_FILTERS)[];
+
+function countActiveFilters(cfg: ScreenerViewConfig): number {
+  return COUNTABLE_FILTER_KEYS.reduce((count, key) => {
+    const val = cfg[key];
+    const def = DEFAULT_SCREENER_FILTERS[key];
+    if (key === 'tickerQuery') {
+      return typeof val === 'string' && val.trim() ? count + 1 : count;
+    }
+    return val !== def ? count + 1 : count;
+  }, 0);
+}
+
+function loadScreenerConfigFromStorage(storage: Storage, key: string): ScreenerViewConfig | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return { ...DEFAULT_SCREENER_CONFIG, ...parsed };
+    }
+  } catch (err) {
+    console.warn(`Error leyendo configuración de screener (${key}):`, err);
+  }
+  return null;
+}
+
+interface ColumnDef {
+  field: SortField;
+  label: string;
+  title?: string;
+  align: 'left' | 'right' | 'center';
+  width: string;
+}
+
+const CUSTOM_COLUMNS: ColumnDef[] = [
+  { field: 'ticker', label: 'Ticker', title: 'Símbolo Bursátil', align: 'left', width: '4.8%' },
+  { field: 'company', label: 'Empresa', title: 'Compañía', align: 'left', width: '7.4%' },
+  { field: 'sector', label: 'Sector', title: 'Sector Económico', align: 'left', width: '5.8%' },
+  { field: 'industry', label: 'Industria', title: 'Industria', align: 'left', width: '6.4%' },
+  { field: 'market_cap', label: 'Cap. M.', title: 'Capitalización de Mercado (USD)', align: 'right', width: '5.2%' },
+  { field: 'price', label: 'Precio', title: 'Precio de Cotización', align: 'right', width: '4.0%' },
+  { field: 'pe', label: 'P/E', title: 'Price to Earnings', align: 'right', width: '3.2%' },
+  { field: 'forward_pe', label: 'Fwd P/E', title: 'Forward P/E', align: 'right', width: '3.5%' },
+  { field: 'ps', label: 'P/S', title: 'Price to Sales', align: 'right', width: '3.0%' },
+  { field: 'rsi', label: 'RSI', title: 'RSI (14D)', align: 'right', width: '3.1%' },
+  { field: 'ev_ebitda', label: 'EV/Eb.', title: 'EV / EBITDA', align: 'right', width: '3.7%' },
+  { field: 'volume', label: 'Vol.', title: 'Volumen de Acciones', align: 'right', width: '4.1%' },
+  { field: 'change_pct', label: 'Var %', title: 'Variación Diaria %', align: 'right', width: '3.8%' },
+  { field: 'eps_past_5y', label: 'EPS 5A', title: 'Crecimiento EPS Pasado 5 Años %', align: 'right', width: '3.6%' },
+  { field: 'profit_m', label: 'Margen N.', title: 'Margen de Beneficio Neto %', align: 'right', width: '3.8%' },
+  { field: 'eps_qq', label: 'EPS Q/Q', title: 'Crecimiento EPS Q/Q %', align: 'right', width: '3.7%' },
+  { field: 'target_price', label: 'Tgt Prc', title: 'Precio Objetivo de Analistas', align: 'right', width: '4.1%' },
+  { field: 'peg', label: 'PEG', title: 'PEG Ratio', align: 'right', width: '3.0%' },
+  { field: 'curr_r', label: 'Curr R', title: 'Current Ratio', align: 'right', width: '3.0%' },
+  { field: 'debt_eq', label: 'Deuda/Eq', title: 'Deuda sobre Patrimonio', align: 'right', width: '3.2%' },
+  { field: 'eps', label: 'EPS', title: 'EPS Diluido', align: 'right', width: '3.1%' },
+  { field: 'eps_past_3y', label: 'EPS 3A', title: 'Crecimiento EPS Pasado 3 Años %', align: 'right', width: '3.5%' },
+  { field: 'roic', label: 'ROIC', title: 'Return on Invested Capital %', align: 'right', width: '3.3%' },
+  { field: 'sma200', label: 'SMA200', title: 'Distancia a Media Móvil 200 Días %', align: 'right', width: '3.7%' },
+  { field: 'sales', label: 'Ventas', title: 'Ventas Totales Anuales (USD)', align: 'right', width: '4.8%' },
+  { field: 'sales_yoy_ttm', label: 'Vts YoY', title: 'Crecimiento Ventas YoY TTM %', align: 'right', width: '3.7%' },
+  { field: 'quant_rating', label: 'Quant', title: 'Quant Factor Grades Rating', align: 'center', width: '5.4%' }
+];
+
+const PARTIAL_VIEW_EXTRA_COLUMNS: Record<Exclude<TableView, 'custom'>, ColumnDef[]> = {
+  overview: [
+    { field: 'sector', label: 'Sector', align: 'left', width: '14%' },
+    { field: 'pe', label: 'P/E', align: 'right', width: '8%' },
+    { field: 'volume', label: 'Volumen', align: 'right', width: '10%' },
+  ],
+  valuation: [
+    { field: 'pe', label: 'P/E', align: 'right', width: '8%' },
+    { field: 'forward_pe', label: 'Fwd P/E', align: 'right', width: '8%' },
+    { field: 'peg', label: 'PEG', align: 'right', width: '8%' },
+    { field: 'ps', label: 'P/S', align: 'right', width: '8%' },
+  ],
+  financial: [
+    { field: 'profit_m', label: 'Margen N.', align: 'right', width: '8%' },
+    { field: 'roic', label: 'ROIC', align: 'right', width: '8%' },
+    { field: 'curr_r', label: 'Curr Ratio', align: 'right', width: '8%' },
+    { field: 'sales', label: 'Ventas', align: 'right', width: '10%' },
+  ],
+  performance: [
+    { field: 'rsi', label: 'RSI', align: 'right', width: '8%' },
+    { field: 'sma200', label: 'SMA200 %', align: 'right', width: '8%' },
+    { field: 'volume', label: 'Volumen', align: 'right', width: '10%' },
+  ],
+  technical: [
+    { field: 'rsi', label: 'RSI', align: 'right', width: '8%' },
+    { field: 'sma50', label: 'SMA50 %', align: 'right', width: '8%' },
+    { field: 'sma200', label: 'SMA200 %', align: 'right', width: '8%' },
+  ],
+};
+
+function getPartialViewColumns(view: Exclude<TableView, 'custom'>): ColumnDef[] {
+  return [
+    { field: 'ticker', label: 'Ticker', align: 'left', width: '8%' },
+    { field: 'company', label: 'Empresa', align: 'left', width: '18%' },
+    { field: 'price', label: 'Precio', align: 'right', width: '8%' },
+    { field: 'change_pct', label: 'Var %', align: 'right', width: '8%' },
+    { field: 'market_cap', label: 'Cap. Mercado', align: 'right', width: '12%' },
+    ...PARTIAL_VIEW_EXTRA_COLUMNS[view],
+    { field: 'quant_rating', label: 'Quant Rating', align: 'center', width: '12%' },
+  ];
+}
+
+function getColumnLabel(field: SortField): string {
+  const found = CUSTOM_COLUMNS.find((c) => c.field === field);
+  return found ? found.label : String(field);
+}
+
+const TABLE_VIEW_LABELS: Record<TableView, string> = {
+  custom: 'Custom (28 Col.)',
+  overview: 'Overview',
+  valuation: 'Valoración',
+  financial: 'Financiero',
+  performance: 'Rendimiento',
+  technical: 'Técnico',
+};
+
 export const StockScreener: React.FC<StockScreenerProps> = ({
   stocks,
   onSelectStock,
@@ -48,12 +252,68 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
   externalAIFilters,
   onOpenAgentDrawerWithQuery
 }) => {
-  // Consulta en lenguaje natural dentro del Screener (Fase 3)
-  const [nlQuery, setNlQuery] = useState('');
-  const [appliedAISummary, setAppliedAISummary] = useState<string | null>(null);
-  // Pestaña de filtros activa y vista de tabla (Custom por defecto según especificación)
-  const [activeCategory, setActiveCategory] = useState<FilterCategory>('fundamental');
-  const [tableView, setTableView] = useState<TableView>('custom');
+  // Estado completo del Screener respaldado en sessionStorage mientras dure la sesión activa
+  const [config, setConfig] = useState<ScreenerViewConfig>(() => {
+    return loadScreenerConfigFromStorage(sessionStorage, SCREENER_SESSION_STORAGE_KEY) || DEFAULT_SCREENER_CONFIG;
+  });
+
+  // Vista Favorita persistente entre sesiones (localStorage)
+  const [favoriteView, setFavoriteView] = useState<ScreenerViewConfig | null>(() => {
+    return loadScreenerConfigFromStorage(localStorage, FAVORITE_VIEW_STORAGE_KEY);
+  });
+
+  const {
+    nlQuery,
+    appliedAISummary,
+    tickerQuery,
+    presetFilter,
+    sectorFilter,
+    industryFilter,
+    countryFilter,
+    marketCapFilter,
+    indexFilter,
+    peFilter,
+    forwardPeFilter,
+    pegFilter,
+    psFilter,
+    epsGrowthQtrFilter,
+    epsGrowthTtmFilter,
+    salesGrowthQtrFilter,
+    salesGrowthTtmFilter,
+    currentRatioFilter,
+    quickRatioFilter,
+    debtEquityFilter,
+    profitMarginFilter,
+    roicFilter,
+    rsiFilter,
+    sma20Filter,
+    sma50Filter,
+    sma200Filter,
+    changePctFilter,
+    activeCategory,
+    tableView,
+    sortField,
+    sortAsc,
+    pageSize,
+    page,
+  } = config;
+
+  const updateConfig = (patch: Partial<ScreenerViewConfig>, resetPage = false) => {
+    setConfig(prev => ({
+      ...prev,
+      ...patch,
+      ...(resetPage ? { page: 1 } : {}),
+    }));
+  };
+
+  // Persistir automáticamente cada cambio de filtros, vista u orden de columnas en sessionStorage
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(SCREENER_SESSION_STORAGE_KEY, JSON.stringify(config));
+    } catch (err) {
+      console.warn('Error guardando estado del Screener en sesión:', err);
+    }
+  }, [config]);
 
   // Menú contextual en clic derecho y modales de Cartera y Listas
   const [contextMenu, setContextMenu] = useState<{
@@ -70,49 +330,6 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
     window.addEventListener('click', handleCloseMenu);
     return () => window.removeEventListener('click', handleCloseMenu);
   }, []);
-
-  // Filtro por lista de tickers separados por coma (ej: SNDK, MU, ASMI, NBIS...)
-  const [tickerQuery, setTickerQuery] = useState('');
-
-  // Preset estratégico rápido
-  const [presetFilter, setPresetFilter] = useState('ALL');
-
-  // Filtros Descriptivos
-  const [sectorFilter, setSectorFilter] = useState('Any');
-  const [industryFilter, setIndustryFilter] = useState('Any');
-  const [countryFilter, setCountryFilter] = useState('Any');
-  const [marketCapFilter, setMarketCapFilter] = useState('Any');
-  const [indexFilter, setIndexFilter] = useState('Any');
-
-  // Filtros Fundamentales
-  const [peFilter, setPeFilter] = useState('Any');
-  const [forwardPeFilter, setForwardPeFilter] = useState('Any');
-  const [pegFilter, setPegFilter] = useState('Any');
-  const [psFilter, setPsFilter] = useState('Any');
-  const [epsGrowthQtrFilter, setEpsGrowthQtrFilter] = useState('Any');
-  const [epsGrowthTtmFilter, setEpsGrowthTtmFilter] = useState('Any');
-  const [salesGrowthQtrFilter, setSalesGrowthQtrFilter] = useState('Any');
-  const [salesGrowthTtmFilter, setSalesGrowthTtmFilter] = useState('Any');
-  const [currentRatioFilter, setCurrentRatioFilter] = useState('Any');
-  const [quickRatioFilter, setQuickRatioFilter] = useState('Any');
-  const [debtEquityFilter, setDebtEquityFilter] = useState('Any');
-  const [profitMarginFilter, setProfitMarginFilter] = useState('Any');
-  const [roicFilter, setRoicFilter] = useState('Any');
-
-  // Filtros Técnicos
-  const [rsiFilter, setRsiFilter] = useState('Any');
-  const [sma20Filter, setSma20Filter] = useState('Any');
-  const [sma50Filter, setSma50Filter] = useState('Any');
-  const [sma200Filter, setSma200Filter] = useState('Any');
-  const [changePctFilter, setChangePctFilter] = useState('Any');
-
-  // Ordenación de tabla (por defecto Capitalización Bursátil descendente)
-  const [sortField, setSortField] = useState<SortField>('market_cap');
-  const [sortAsc, setSortAsc] = useState<boolean>(false);
-
-  // Paginación
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
 
   // Listas únicas para selects descriptivos
   const sectors = useMemo(() => {
@@ -134,113 +351,101 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
   }, [stocks]);
 
   // Contador de filtros activos
-  const activeFiltersCount = useMemo(() => {
-    let count = 0;
-    if (tickerQuery.trim()) count++;
-    if (presetFilter !== 'ALL') count++;
-    if (sectorFilter !== 'Any') count++;
-    if (industryFilter !== 'Any') count++;
-    if (countryFilter !== 'Any') count++;
-    if (marketCapFilter !== 'Any') count++;
-    if (indexFilter !== 'Any') count++;
-    if (peFilter !== 'Any') count++;
-    if (forwardPeFilter !== 'Any') count++;
-    if (pegFilter !== 'Any') count++;
-    if (psFilter !== 'Any') count++;
-    if (epsGrowthQtrFilter !== 'Any') count++;
-    if (epsGrowthTtmFilter !== 'Any') count++;
-    if (salesGrowthQtrFilter !== 'Any') count++;
-    if (salesGrowthTtmFilter !== 'Any') count++;
-    if (currentRatioFilter !== 'Any') count++;
-    if (quickRatioFilter !== 'Any') count++;
-    if (debtEquityFilter !== 'Any') count++;
-    if (profitMarginFilter !== 'Any') count++;
-    if (roicFilter !== 'Any') count++;
-    if (rsiFilter !== 'Any') count++;
-    if (sma20Filter !== 'Any') count++;
-    if (sma50Filter !== 'Any') count++;
-    if (sma200Filter !== 'Any') count++;
-    if (changePctFilter !== 'Any') count++;
-    return count;
-  }, [
-    tickerQuery, presetFilter, sectorFilter, industryFilter, countryFilter, marketCapFilter, indexFilter,
-    peFilter, forwardPeFilter, pegFilter, psFilter, epsGrowthQtrFilter, epsGrowthTtmFilter,
-    salesGrowthQtrFilter, salesGrowthTtmFilter, currentRatioFilter, quickRatioFilter,
-    debtEquityFilter, profitMarginFilter, roicFilter, rsiFilter, sma20Filter, sma50Filter, sma200Filter, changePctFilter
-  ]);
+  const activeFiltersCount = useMemo(() => countActiveFilters(config), [config]);
+
+  // Verificar si la configuración actual coincide exactamente con la Vista Favorita guardada
+  const isFavoriteViewActive = useMemo(() => {
+    if (!favoriteView) return false;
+    const comparableKeys = Object.keys(DEFAULT_SCREENER_CONFIG).filter(
+      (k) => k !== 'page' && k !== 'savedAt'
+    ) as (keyof ScreenerViewConfig)[];
+    return comparableKeys.every((key) => config[key] === favoriteView[key]);
+  }, [config, favoriteView]);
+
+  // Guardar la configuración actual de filtros y orden de columnas como Vista Favorita
+  const handleSaveFavoriteView = () => {
+    const viewToSave: ScreenerViewConfig = {
+      ...config,
+      page: 1,
+      savedAt: new Date().toISOString(),
+    };
+    try {
+      localStorage.setItem(FAVORITE_VIEW_STORAGE_KEY, JSON.stringify(viewToSave));
+      setFavoriteView(viewToSave);
+      toast.success('★ Vista Favorita guardada (filtros y orden de columnas)');
+    } catch (err) {
+      console.error('Error guardando Vista Favorita:', err);
+      toast.error('No se pudo guardar la Vista Favorita en este navegador');
+    }
+  };
+
+  // Aplicar Vista Favorita con un solo clic
+  const handleApplyFavoriteView = () => {
+    if (!favoriteView) {
+      toast.info('Aún no tienes una Vista Favorita guardada. Configura tus filtros y orden de columnas, luego pulsa "Guardar Vista Favorita".');
+      return;
+    }
+    setConfig({
+      ...DEFAULT_SCREENER_CONFIG,
+      ...favoriteView,
+      page: 1,
+    });
+    toast.success('★ Vista Favorita aplicada');
+  };
+
+  // Eliminar Vista Favorita guardada
+  const handleDeleteFavoriteView = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      localStorage.removeItem(FAVORITE_VIEW_STORAGE_KEY);
+      setFavoriteView(null);
+      toast.info('Vista Favorita eliminada');
+    } catch (err) {
+      console.error('Error eliminando Vista Favorita:', err);
+    }
+  };
 
   // Reset Completo de Filtros
   const handleResetFilters = () => {
-    setTickerQuery('');
-    setPresetFilter('ALL');
-    setSectorFilter('Any');
-    setIndustryFilter('Any');
-    setCountryFilter('Any');
-    setMarketCapFilter('Any');
-    setIndexFilter('Any');
-    setPeFilter('Any');
-    setForwardPeFilter('Any');
-    setPegFilter('Any');
-    setPsFilter('Any');
-    setEpsGrowthQtrFilter('Any');
-    setEpsGrowthTtmFilter('Any');
-    setSalesGrowthQtrFilter('Any');
-    setSalesGrowthTtmFilter('Any');
-    setCurrentRatioFilter('Any');
-    setQuickRatioFilter('Any');
-    setDebtEquityFilter('Any');
-    setProfitMarginFilter('Any');
-    setRoicFilter('Any');
-    setRsiFilter('Any');
-    setSma20Filter('Any');
-    setSma50Filter('Any');
-    setSma200Filter('Any');
-    setChangePctFilter('Any');
-    setAppliedAISummary(null);
-    setPage(1);
+    setConfig(prev => ({
+      ...prev,
+      ...DEFAULT_SCREENER_FILTERS,
+      page: 1,
+    }));
   };
 
   // Fase 3: Aplicar payload de filtros generado por Lenguaje Natural IA
-  const applyAIFilterPayload = (payload: ScreenerUIFilterPayload) => {
-    // Primero limpiar filtros previos
-    setPresetFilter('ALL');
-    setSectorFilter(payload.sectorFilter || 'Any');
-    setIndustryFilter('Any');
-    setCountryFilter('Any');
-    setMarketCapFilter(payload.marketCapFilter || 'Any');
-    setIndexFilter('Any');
-    setPeFilter(payload.peFilter || 'Any');
-    setForwardPeFilter(payload.forwardPeFilter || 'Any');
-    setPegFilter(payload.pegFilter || 'Any');
-    setPsFilter('Any');
-    setEpsGrowthQtrFilter(payload.epsGrowthQtrFilter || 'Any');
-    setEpsGrowthTtmFilter('Any');
-    setSalesGrowthQtrFilter('Any');
-    setSalesGrowthTtmFilter(payload.salesGrowthTtmFilter || 'Any');
-    setCurrentRatioFilter(payload.currentRatioFilter || 'Any');
-    setQuickRatioFilter('Any');
-    setDebtEquityFilter(payload.debtEquityFilter || 'Any');
-    setProfitMarginFilter(payload.profitMarginFilter || 'Any');
-    setRoicFilter(payload.roicFilter || 'Any');
-    setRsiFilter(payload.rsiFilter || 'Any');
-    setSma20Filter('Any');
-    setSma50Filter(payload.sma50Filter || 'Any');
-    setSma200Filter(payload.sma200Filter || 'Any');
-    setChangePctFilter('Any');
-    if (payload.tickerQuery !== undefined) {
-      setTickerQuery(payload.tickerQuery);
-    }
-    setActiveCategory('all');
-    setAppliedAISummary(payload.summaryText || 'Filtros cuantitativos aplicados por IA');
-    setPage(1);
+  const applyAIFilterPayload = (payload: ScreenerUIFilterPayload, nlTextOverride?: string) => {
+    setConfig(prev => ({
+      ...prev,
+      ...DEFAULT_SCREENER_FILTERS,
+      nlQuery: nlTextOverride ?? prev.nlQuery,
+      sectorFilter: payload.sectorFilter || 'Any',
+      marketCapFilter: payload.marketCapFilter || 'Any',
+      peFilter: payload.peFilter || 'Any',
+      forwardPeFilter: payload.forwardPeFilter || 'Any',
+      pegFilter: payload.pegFilter || 'Any',
+      epsGrowthQtrFilter: payload.epsGrowthQtrFilter || 'Any',
+      salesGrowthTtmFilter: payload.salesGrowthTtmFilter || 'Any',
+      currentRatioFilter: payload.currentRatioFilter || 'Any',
+      debtEquityFilter: payload.debtEquityFilter || 'Any',
+      profitMarginFilter: payload.profitMarginFilter || 'Any',
+      roicFilter: payload.roicFilter || 'Any',
+      rsiFilter: payload.rsiFilter || 'Any',
+      sma50Filter: payload.sma50Filter || 'Any',
+      sma200Filter: payload.sma200Filter || 'Any',
+      tickerQuery: payload.tickerQuery !== undefined ? payload.tickerQuery : '',
+      activeCategory: 'all',
+      appliedAISummary: payload.summaryText || 'Filtros cuantitativos aplicados por IA',
+      page: 1,
+    }));
   };
 
   const handleApplyNaturalLanguage = (customText?: string) => {
     const query = (customText ?? nlQuery).trim();
     if (!query) return;
-    if (customText) setNlQuery(customText);
     const parsed = parseNaturalLanguageToScreenerFilters(query);
-    applyAIFilterPayload(parsed);
+    applyAIFilterPayload(parsed, customText ?? query);
     toast.success(`Filtro IA aplicado: ${parsed.summaryText}`);
   };
 
@@ -472,14 +677,13 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
-      setSortAsc(!sortAsc);
+      updateConfig({ sortAsc: !sortAsc });
     } else {
-      setSortField(field);
       const defaultDesc = [
         'market_cap', 'price', 'volume', 'roic', 'profit_m', 'change_pct',
         'quant_rating', 'sales', 'eps_qq', 'sales_yoy_ttm', 'eps_past_5y', 'eps'
       ].includes(field);
-      setSortAsc(!defaultDesc);
+      updateConfig({ sortField: field, sortAsc: !defaultDesc });
     }
   };
 
@@ -547,6 +751,100 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
     fontSize: '0.78rem'
   };
 
+  const favoriteFiltersCount = favoriteView ? countActiveFilters(favoriteView) : 0;
+  const favoriteSummaryTooltip = favoriteView
+    ? `Aplicar Vista Favorita (${TABLE_VIEW_LABELS[favoriteView.tableView]} · Orden: ${getColumnLabel(favoriteView.sortField)} ${favoriteView.sortAsc ? '↑' : '↓'} · ${favoriteFiltersCount} ${favoriteFiltersCount === 1 ? 'filtro' : 'filtros'})`
+    : 'Aún no hay una Vista Favorita guardada. Configura tus filtros y orden de columnas y presiona "Guardar Vista Favorita".';
+
+  const renderFavoriteApplyButton = (compact = false) => (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+      <button
+        type="button"
+        onClick={handleApplyFavoriteView}
+        className="btn"
+        style={{
+          padding: compact ? '4px 10px' : '6px 12px',
+          fontSize: compact ? '0.74rem' : '0.78rem',
+          fontWeight: 700,
+          background: isFavoriteViewActive
+            ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.28) 0%, rgba(217, 119, 6, 0.22) 100%)'
+            : favoriteView
+            ? 'rgba(245, 158, 11, 0.12)'
+            : 'rgba(15, 23, 42, 0.65)',
+          border: isFavoriteViewActive
+            ? '1px solid #f59e0b'
+            : favoriteView
+            ? '1px solid rgba(245, 158, 11, 0.45)'
+            : '1px dashed rgba(148, 163, 184, 0.35)',
+          color: favoriteView ? '#fbbf24' : 'var(--text-muted)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '5px',
+          boxShadow: isFavoriteViewActive ? '0 0 12px rgba(245, 158, 11, 0.22)' : 'none',
+        }}
+        title={favoriteSummaryTooltip}
+      >
+        <Star
+          size={compact ? 12 : 13}
+          color={favoriteView ? '#fbbf24' : 'var(--text-muted)'}
+          fill={favoriteView ? '#fbbf24' : 'none'}
+        />
+        <span>Vista Favorita</span>
+        {favoriteView && (
+          <span
+            style={{
+              fontSize: '0.66rem',
+              opacity: 0.9,
+              background: 'rgba(245, 158, 11, 0.16)',
+              padding: '1px 5px',
+              borderRadius: '4px',
+              fontFamily: 'monospace',
+            }}
+          >
+            {getColumnLabel(favoriteView.sortField)} {favoriteView.sortAsc ? '↑' : '↓'} · {favoriteFiltersCount}f
+          </span>
+        )}
+        {isFavoriteViewActive && <Check size={12} color="#fbbf24" />}
+      </button>
+      {favoriteView && (
+        <button
+          type="button"
+          onClick={handleDeleteFavoriteView}
+          className="btn btn-secondary"
+          style={{
+            padding: compact ? '4px 6px' : '6px 7px',
+            fontSize: '0.72rem',
+            color: 'var(--text-muted)',
+            borderColor: 'rgba(245, 158, 11, 0.25)',
+          }}
+          title="Eliminar Vista Favorita guardada"
+        >
+          <Trash2 size={12} />
+        </button>
+      )}
+    </div>
+  );
+
+  const renderSaveFavoriteButton = (compact = false) => (
+    <button
+      type="button"
+      onClick={handleSaveFavoriteView}
+      className="btn btn-secondary"
+      style={{
+        padding: compact ? '4px 10px' : '6px 12px',
+        fontSize: compact ? '0.74rem' : '0.78rem',
+        fontWeight: 700,
+        borderColor: 'rgba(245, 158, 11, 0.45)',
+        color: '#fcd34d',
+        background: 'rgba(245, 158, 11, 0.08)',
+      }}
+      title="Guardar los filtros, vista y orden de columnas actuales como tu Vista Favorita"
+    >
+      <Star size={compact ? 12 : 13} color="#fbbf24" />
+      Guardar Vista Favorita
+    </button>
+  );
+
   return (
     <div style={{ maxWidth: '100%', margin: '0 auto', padding: '16px 20px' }} className="animate-fade-in">
       
@@ -564,7 +862,9 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
             </p>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {renderFavoriteApplyButton(false)}
+            {renderSaveFavoriteButton(false)}
             <button 
               onClick={handleResetFilters} 
               className="btn btn-secondary" 
@@ -606,10 +906,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
               type="text"
               placeholder="Introduce tickers separados por coma o espacio (ej: SNDK, MU, ASMI, NBIS, WDC, STX)..."
               value={tickerQuery}
-              onChange={(e) => {
-                setTickerQuery(e.target.value);
-                setPage(1);
-              }}
+              onChange={(e) => updateConfig({ tickerQuery: e.target.value }, true)}
               style={{
                 width: '100%',
                 background: '#040711',
@@ -624,7 +921,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           </div>
           {tickerQuery && (
             <button 
-              onClick={() => { setTickerQuery(''); setPage(1); }} 
+              onClick={() => updateConfig({ tickerQuery: '' }, true)} 
               className="btn btn-secondary" 
               style={{ padding: '4px 10px', fontSize: '0.75rem' }}
             >
@@ -673,7 +970,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                 type="text"
                 placeholder="Ej: Empresas tecnológicas con ROIC > 15%, margen > 20% y baja deuda..."
                 value={nlQuery}
-                onChange={(e) => setNlQuery(e.target.value)}
+                onChange={(e) => updateConfig({ nlQuery: e.target.value })}
                 style={{
                   flex: 1,
                   background: '#040711',
@@ -772,15 +1069,17 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           </div>
         </div>
 
-        {/* Presets Rápidos de Estrategia Institucional */}
+        {/* Presets Rápidos de Estrategia Institucional y Vista Favorita */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, marginRight: '4px' }}>
             Presets:
           </span>
+          {renderFavoriteApplyButton(true)}
+          {renderSaveFavoriteButton(true)}
           <button 
             className={`btn ${presetFilter === 'ALL' ? 'btn-active' : 'btn-secondary'}`}
             style={{ padding: '4px 10px', fontSize: '0.74rem' }}
-            onClick={() => { setPresetFilter('ALL'); setPage(1); }}
+            onClick={() => updateConfig({ presetFilter: 'ALL' }, true)}
           >
             Todas ({stocks.length})
           </button>
@@ -792,7 +1091,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
               border: presetFilter === 'STRATEGY' ? '1px solid var(--accent-green)' : '1px solid rgba(16, 185, 129, 0.35)',
               color: presetFilter === 'STRATEGY' ? '#fff' : 'var(--accent-green)'
             }}
-            onClick={() => { setPresetFilter('STRATEGY'); setPage(1); }}
+            onClick={() => updateConfig({ presetFilter: 'STRATEGY' }, true)}
           >
             <Sparkles size={12} color="var(--accent-green)" />
             Estrategia Inversor Colombia
@@ -800,7 +1099,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           <button 
             className={`btn ${presetFilter === 'VALUE' ? 'btn-active' : 'btn-secondary'}`}
             style={{ padding: '4px 10px', fontSize: '0.74rem' }}
-            onClick={() => { setPresetFilter('VALUE'); setPage(1); }}
+            onClick={() => updateConfig({ presetFilter: 'VALUE' }, true)}
           >
             <DollarSign size={12} />
             Gran Valor (PEG &lt; 1.0)
@@ -808,7 +1107,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           <button 
             className={`btn ${presetFilter === 'ROIC' ? 'btn-active' : 'btn-secondary'}`}
             style={{ padding: '4px 10px', fontSize: '0.74rem' }}
-            onClick={() => { setPresetFilter('ROIC'); setPage(1); }}
+            onClick={() => updateConfig({ presetFilter: 'ROIC' }, true)}
           >
             <ShieldCheck size={12} />
             Alta Rentabilidad (ROIC &gt; 15%)
@@ -816,7 +1115,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           <button 
             className={`btn ${presetFilter === 'RSI_BOUNCE' ? 'btn-active' : 'btn-secondary'}`}
             style={{ padding: '4px 10px', fontSize: '0.74rem' }}
-            onClick={() => { setPresetFilter('RSI_BOUNCE'); setPage(1); }}
+            onClick={() => updateConfig({ presetFilter: 'RSI_BOUNCE' }, true)}
           >
             <TrendingUp size={12} />
             Rebote Técnico (RSI 40-55)
@@ -824,7 +1123,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           <button 
             className={`btn ${presetFilter === 'MEGA_CAP' ? 'btn-active' : 'btn-secondary'}`}
             style={{ padding: '4px 10px', fontSize: '0.74rem' }}
-            onClick={() => { setPresetFilter('MEGA_CAP'); setPage(1); }}
+            onClick={() => updateConfig({ presetFilter: 'MEGA_CAP' }, true)}
           >
             Megacaps (&gt; $50B)
           </button>
@@ -839,28 +1138,28 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           <button
             className={`btn ${activeCategory === 'descriptive' ? 'btn-active' : 'btn-secondary'}`}
             style={{ padding: '4px 12px', fontSize: '0.76rem', fontWeight: 700 }}
-            onClick={() => setActiveCategory('descriptive')}
+            onClick={() => updateConfig({ activeCategory: 'descriptive' })}
           >
             Descriptive
           </button>
           <button
             className={`btn ${activeCategory === 'fundamental' ? 'btn-active' : 'btn-secondary'}`}
             style={{ padding: '4px 12px', fontSize: '0.76rem', fontWeight: 700 }}
-            onClick={() => setActiveCategory('fundamental')}
+            onClick={() => updateConfig({ activeCategory: 'fundamental' })}
           >
             Fundamental
           </button>
           <button
             className={`btn ${activeCategory === 'technical' ? 'btn-active' : 'btn-secondary'}`}
             style={{ padding: '4px 12px', fontSize: '0.76rem', fontWeight: 700 }}
-            onClick={() => setActiveCategory('technical')}
+            onClick={() => updateConfig({ activeCategory: 'technical' })}
           >
             Technical
           </button>
           <button
             className={`btn ${activeCategory === 'all' ? 'btn-active' : 'btn-secondary'}`}
             style={{ padding: '4px 12px', fontSize: '0.76rem', fontWeight: 700 }}
-            onClick={() => setActiveCategory('all')}
+            onClick={() => updateConfig({ activeCategory: 'all' })}
           >
             All Filters
           </button>
@@ -879,7 +1178,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
             <>
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>Sector</label>
-                <select value={sectorFilter} onChange={e => { setSectorFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={sectorFilter} onChange={e => updateConfig({ sectorFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   {sectors.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
@@ -887,7 +1186,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>Industry</label>
-                <select value={industryFilter} onChange={e => { setIndustryFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={industryFilter} onChange={e => updateConfig({ industryFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   {industries.map(i => <option key={i} value={i}>{i}</option>)}
                 </select>
@@ -895,7 +1194,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>Country</label>
-                <select value={countryFilter} onChange={e => { setCountryFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={countryFilter} onChange={e => updateConfig({ countryFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   {countries.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
@@ -903,7 +1202,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>Market Cap</label>
-                <select value={marketCapFilter} onChange={e => { setMarketCapFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={marketCapFilter} onChange={e => updateConfig({ marketCapFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Mega ($200bln+)">Mega ($200bln+)</option>
                   <option value="Large ($10bln-$200bln)">Large ($10bln-$200bln)</option>
@@ -920,7 +1219,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
             <>
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>P/E</label>
-                <select value={peFilter} onChange={e => { setPeFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={peFilter} onChange={e => updateConfig({ peFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Under 15">Under 15</option>
                   <option value="Under 20">Under 20</option>
@@ -932,7 +1231,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>Forward P/E</label>
-                <select value={forwardPeFilter} onChange={e => { setForwardPeFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={forwardPeFilter} onChange={e => updateConfig({ forwardPeFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Under 15">Under 15</option>
                   <option value="Under 20">Under 20</option>
@@ -942,7 +1241,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>PEG</label>
-                <select value={pegFilter} onChange={e => { setPegFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={pegFilter} onChange={e => updateConfig({ pegFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Under 1">Under 1</option>
                   <option value="Under 2">Under 2</option>
@@ -951,7 +1250,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>P/S</label>
-                <select value={psFilter} onChange={e => { setPsFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={psFilter} onChange={e => updateConfig({ psFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Under 1">Under 1</option>
                   <option value="Under 3">Under 3</option>
@@ -961,7 +1260,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>Current Ratio</label>
-                <select value={currentRatioFilter} onChange={e => { setCurrentRatioFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={currentRatioFilter} onChange={e => updateConfig({ currentRatioFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Over 1">Over 1</option>
                   <option value="Over 1.5">Over 1.5</option>
@@ -971,7 +1270,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>Quick Ratio</label>
-                <select value={quickRatioFilter} onChange={e => { setQuickRatioFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={quickRatioFilter} onChange={e => updateConfig({ quickRatioFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Over 1">Over 1</option>
                   <option value="Over 1.5">Over 1.5</option>
@@ -980,7 +1279,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>EPS Growth Q/Q</label>
-                <select value={epsGrowthQtrFilter} onChange={e => { setEpsGrowthQtrFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={epsGrowthQtrFilter} onChange={e => updateConfig({ epsGrowthQtrFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Over 10%">Over 10%</option>
                   <option value="Over 15%">Over 15%</option>
@@ -990,7 +1289,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>EPS Growth TTM</label>
-                <select value={epsGrowthTtmFilter} onChange={e => { setEpsGrowthTtmFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={epsGrowthTtmFilter} onChange={e => updateConfig({ epsGrowthTtmFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Over 10%">Over 10%</option>
                   <option value="Over 15%">Over 15%</option>
@@ -1000,7 +1299,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>Net Profit Margin</label>
-                <select value={profitMarginFilter} onChange={e => { setProfitMarginFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={profitMarginFilter} onChange={e => updateConfig({ profitMarginFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Positive (>0%)">Positive (&gt;0%)</option>
                   <option value="Over 15%">Over 15%</option>
@@ -1010,7 +1309,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>Debt / Equity</label>
-                <select value={debtEquityFilter} onChange={e => { setDebtEquityFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={debtEquityFilter} onChange={e => updateConfig({ debtEquityFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Under 0.5">Under 0.5</option>
                   <option value="Under 1">Under 1</option>
@@ -1019,7 +1318,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>ROIC</label>
-                <select value={roicFilter} onChange={e => { setRoicFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={roicFilter} onChange={e => updateConfig({ roicFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Over 10%">Over 10%</option>
                   <option value="Over 15%">Over 15%</option>
@@ -1028,7 +1327,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>Sales Growth Q/Q</label>
-                <select value={salesGrowthQtrFilter} onChange={e => { setSalesGrowthQtrFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={salesGrowthQtrFilter} onChange={e => updateConfig({ salesGrowthQtrFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Over 10%">Over 10%</option>
                   <option value="Over 20%">Over 20%</option>
@@ -1042,7 +1341,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
             <>
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>RSI (14)</label>
-                <select value={rsiFilter} onChange={e => { setRsiFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={rsiFilter} onChange={e => updateConfig({ rsiFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Oversold (30)">Oversold (30)</option>
                   <option value="Overbought (70)">Overbought (70)</option>
@@ -1052,7 +1351,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>Change %</label>
-                <select value={changePctFilter} onChange={e => { setChangePctFilter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={changePctFilter} onChange={e => updateConfig({ changePctFilter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Up">Up (&gt;0%)</option>
                   <option value="Down">Down (&lt;0%)</option>
@@ -1063,7 +1362,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>20-Day SMA</label>
-                <select value={sma20Filter} onChange={e => { setSma20Filter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={sma20Filter} onChange={e => updateConfig({ sma20Filter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Price above SMA20">Price above SMA20</option>
                   <option value="Price below SMA20">Price below SMA20</option>
@@ -1072,7 +1371,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>50-Day SMA</label>
-                <select value={sma50Filter} onChange={e => { setSma50Filter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={sma50Filter} onChange={e => updateConfig({ sma50Filter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Price above SMA50">Price above SMA50</option>
                   <option value="Price below SMA50">Price below SMA50</option>
@@ -1081,7 +1380,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
               <div>
                 <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '3px', fontSize: '0.72rem' }}>200-Day SMA</label>
-                <select value={sma200Filter} onChange={e => { setSma200Filter(e.target.value); setPage(1); }} style={selectStyle}>
+                <select value={sma200Filter} onChange={e => updateConfig({ sma200Filter: e.target.value }, true)} style={selectStyle}>
                   <option value="Any">Any</option>
                   <option value="Price above SMA200">Price above SMA200</option>
                   <option value="Price below SMA200">Price below SMA200</option>
@@ -1104,55 +1403,32 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
         padding: '0 4px'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-          <button
-            className={`btn ${tableView === 'custom' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.74rem', fontWeight: 700 }}
-            onClick={() => setTableView('custom')}
-          >
-            Custom (28 Columnas)
-          </button>
-          <button
-            className={`btn ${tableView === 'overview' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.74rem', fontWeight: 600 }}
-            onClick={() => setTableView('overview')}
-          >
-            Overview
-          </button>
-          <button
-            className={`btn ${tableView === 'valuation' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.74rem', fontWeight: 600 }}
-            onClick={() => setTableView('valuation')}
-          >
-            Valoración
-          </button>
-          <button
-            className={`btn ${tableView === 'financial' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.74rem', fontWeight: 600 }}
-            onClick={() => setTableView('financial')}
-          >
-            Financiero
-          </button>
-          <button
-            className={`btn ${tableView === 'performance' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.74rem', fontWeight: 600 }}
-            onClick={() => setTableView('performance')}
-          >
-            Rendimiento
-          </button>
-          <button
-            className={`btn ${tableView === 'technical' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.74rem', fontWeight: 600 }}
-            onClick={() => setTableView('technical')}
-          >
-            Técnico
-          </button>
+          {(
+            [
+              { id: 'custom', label: 'Custom (28 Columnas)', bold: true },
+              { id: 'overview', label: 'Overview', bold: false },
+              { id: 'valuation', label: 'Valoración', bold: false },
+              { id: 'financial', label: 'Financiero', bold: false },
+              { id: 'performance', label: 'Rendimiento', bold: false },
+              { id: 'technical', label: 'Técnico', bold: false },
+            ] as { id: TableView; label: string; bold: boolean }[]
+          ).map(({ id, label, bold }) => (
+            <button
+              key={id}
+              className={`btn ${tableView === id ? 'btn-active' : 'btn-secondary'}`}
+              style={{ padding: '4px 10px', fontSize: '0.74rem', fontWeight: bold ? 700 : 600 }}
+              onClick={() => updateConfig({ tableView: id })}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
           <span>Mostrar:</span>
           <select 
             value={pageSize} 
-            onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+            onChange={(e) => updateConfig({ pageSize: Number(e.target.value) }, true)}
             style={{ ...selectStyle, width: 'auto', padding: '3px 8px', fontSize: '0.74rem' }}
           >
             <option value={25}>25 filas</option>
@@ -1182,139 +1458,49 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
         }}>
           <thead>
             <tr style={{ background: '#090e1a', borderBottom: '1px solid var(--border-medium)' }}>
-              
-              {/* VISTA 1: CUSTOM (TODAS LAS COLUMNAS DE LA IMAGEN DE EJEMPLO + QUANT RATING + ACCIÓN) */}
-              {tableView === 'custom' && (
-                <>
-                  {[
-                    { field: 'ticker', label: 'Ticker', title: 'Símbolo Bursátil', align: 'left', width: '4.8%' },
-                    { field: 'company', label: 'Empresa', title: 'Compañía', align: 'left', width: '7.4%' },
-                    { field: 'sector', label: 'Sector', title: 'Sector Económico', align: 'left', width: '5.8%' },
-                    { field: 'industry', label: 'Industria', title: 'Industria', align: 'left', width: '6.4%' },
-                    { field: 'market_cap', label: 'Cap. M.', title: 'Capitalización de Mercado (USD)', align: 'right', width: '5.2%' },
-                    { field: 'price', label: 'Precio', title: 'Precio de Cotización', align: 'right', width: '4.0%' },
-                    { field: 'pe', label: 'P/E', title: 'Price to Earnings', align: 'right', width: '3.2%' },
-                    { field: 'forward_pe', label: 'Fwd P/E', title: 'Forward P/E', align: 'right', width: '3.5%' },
-                    { field: 'ps', label: 'P/S', title: 'Price to Sales', align: 'right', width: '3.0%' },
-                    { field: 'rsi', label: 'RSI', title: 'RSI (14D)', align: 'right', width: '3.1%' },
-                    { field: 'ev_ebitda', label: 'EV/Eb.', title: 'EV / EBITDA', align: 'right', width: '3.7%' },
-                    { field: 'volume', label: 'Vol.', title: 'Volumen de Acciones', align: 'right', width: '4.1%' },
-                    { field: 'change_pct', label: 'Var %', title: 'Variación Diaria %', align: 'right', width: '3.8%' },
-                    { field: 'eps_past_5y', label: 'EPS 5A', title: 'Crecimiento EPS Pasado 5 Años %', align: 'right', width: '3.6%' },
-                    { field: 'profit_m', label: 'Margen N.', title: 'Margen de Beneficio Neto %', align: 'right', width: '3.8%' },
-                    { field: 'eps_qq', label: 'EPS Q/Q', title: 'Crecimiento EPS Q/Q %', align: 'right', width: '3.7%' },
-                    { field: 'target_price', label: 'Tgt Prc', title: 'Precio Objetivo de Analistas', align: 'right', width: '4.1%' },
-                    { field: 'peg', label: 'PEG', title: 'PEG Ratio', align: 'right', width: '3.0%' },
-                    { field: 'curr_r', label: 'Curr R', title: 'Current Ratio', align: 'right', width: '3.0%' },
-                    { field: 'debt_eq', label: 'Deuda/Eq', title: 'Deuda sobre Patrimonio', align: 'right', width: '3.2%' },
-                    { field: 'eps', label: 'EPS', title: 'EPS Diluido', align: 'right', width: '3.1%' },
-                    { field: 'eps_past_3y', label: 'EPS 3A', title: 'Crecimiento EPS Pasado 3 Años %', align: 'right', width: '3.5%' },
-                    { field: 'roic', label: 'ROIC', title: 'Return on Invested Capital %', align: 'right', width: '3.3%' },
-                    { field: 'sma200', label: 'SMA200', title: 'Distancia a Media Móvil 200 Días %', align: 'right', width: '3.7%' },
-                    { field: 'sales', label: 'Ventas', title: 'Ventas Totales Anuales (USD)', align: 'right', width: '4.8%' },
-                    { field: 'sales_yoy_ttm', label: 'Vts YoY', title: 'Crecimiento Ventas YoY TTM %', align: 'right', width: '3.7%' },
-                    { field: 'quant_rating', label: 'Quant', title: 'Quant Factor Grades Rating', align: 'center', width: '5.4%' }
-                  ].map(({ field, label, title, align, width }) => {
-                    const isSorted = sortField === field;
-                    return (
-                      <th
-                        key={field}
-                        onClick={() => handleSort(field as SortField)}
-                        style={{
-                          width,
-                          textAlign: align as any,
-                          padding: '7px 2px',
-                          cursor: 'pointer',
-                          userSelect: 'none',
-                          color: isSorted ? '#fff' : 'var(--text-secondary)',
-                          background: isSorted ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
-                          borderBottom: isSorted ? '2px solid var(--accent-green)' : '1px solid var(--border-medium)',
-                          fontWeight: 700,
-                          fontSize: '0.63rem',
-                          textTransform: 'uppercase',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis'
-                        }}
-                        title={`${title} (${isSorted ? (sortAsc ? 'Ascendente' : 'Descendente') : 'Clic para ordenar'})`}
-                      >
-                        <div style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '2px',
-                          justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start',
-                          width: '100%'
-                        }}>
-                          <span>{label}</span>
-                          {isSorted && (
-                            sortAsc ? <ArrowUp size={10} color="var(--accent-green)" /> : <ArrowDown size={10} color="var(--accent-green)" />
-                          )}
-                        </div>
-                      </th>
-                    );
-                  })}
-                  <th style={{ width: '3.4%', textAlign: 'center', padding: '7px 2px', fontSize: '0.63rem', color: 'var(--text-secondary)' }}>
-                    Acción
+              {(tableView === 'custom' ? CUSTOM_COLUMNS : getPartialViewColumns(tableView)).map(({ field, label, title, align, width }) => {
+                const isSorted = sortField === field;
+                const isCustom = tableView === 'custom';
+                return (
+                  <th
+                    key={field}
+                    onClick={() => handleSort(field)}
+                    style={{
+                      width,
+                      textAlign: align,
+                      padding: isCustom ? '7px 2px' : '7px 4px',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      color: isSorted ? '#fff' : 'var(--text-secondary)',
+                      background: isSorted ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
+                      borderBottom: isSorted ? '2px solid var(--accent-green)' : '1px solid var(--border-medium)',
+                      fontWeight: 700,
+                      fontSize: isCustom ? '0.63rem' : '0.67rem',
+                      textTransform: isCustom ? 'uppercase' : 'none',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}
+                    title={`${title || label} (${isSorted ? (sortAsc ? 'Ascendente' : 'Descendente') : 'Clic para ordenar'})`}
+                  >
+                    <div style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '2px',
+                      justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start',
+                      width: '100%'
+                    }}>
+                      <span>{label}</span>
+                      {isSorted && (
+                        sortAsc ? <ArrowUp size={10} color="var(--accent-green)" /> : <ArrowDown size={10} color="var(--accent-green)" />
+                      )}
+                    </div>
                   </th>
-                </>
-              )}
-
-              {/* VISTAS PRECONFIGURADAS (OVERVIEW, VALUATION, FINANCIAL, PERFORMANCE, TECHNICAL) */}
-              {tableView !== 'custom' && (
-                <>
-                  <th onClick={() => handleSort('ticker')} style={{ width: '8%', padding: '7px 4px', cursor: 'pointer', color: sortField === 'ticker' ? '#fff' : 'inherit' }}>Ticker</th>
-                  <th onClick={() => handleSort('company')} style={{ width: '18%', padding: '7px 4px', cursor: 'pointer' }}>Empresa</th>
-                  <th onClick={() => handleSort('price')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>Precio</th>
-                  <th onClick={() => handleSort('change_pct')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>Var %</th>
-                  <th onClick={() => handleSort('market_cap')} style={{ width: '12%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>Cap. Mercado</th>
-                  
-                  {tableView === 'overview' && (
-                    <>
-                      <th onClick={() => handleSort('sector')} style={{ width: '14%', padding: '7px 4px', cursor: 'pointer' }}>Sector</th>
-                      <th onClick={() => handleSort('pe')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>P/E</th>
-                      <th onClick={() => handleSort('volume')} style={{ width: '10%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>Volumen</th>
-                    </>
-                  )}
-
-                  {tableView === 'valuation' && (
-                    <>
-                      <th onClick={() => handleSort('pe')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>P/E</th>
-                      <th onClick={() => handleSort('forward_pe')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>Fwd P/E</th>
-                      <th onClick={() => handleSort('peg')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>PEG</th>
-                      <th onClick={() => handleSort('ps')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>P/S</th>
-                    </>
-                  )}
-
-                  {tableView === 'financial' && (
-                    <>
-                      <th onClick={() => handleSort('profit_m')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>Margen N.</th>
-                      <th onClick={() => handleSort('roic')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>ROIC</th>
-                      <th onClick={() => handleSort('curr_r')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>Curr Ratio</th>
-                      <th onClick={() => handleSort('sales')} style={{ width: '10%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>Ventas</th>
-                    </>
-                  )}
-
-                  {tableView === 'performance' && (
-                    <>
-                      <th onClick={() => handleSort('rsi')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>RSI</th>
-                      <th onClick={() => handleSort('sma200')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>SMA200 %</th>
-                      <th onClick={() => handleSort('volume')} style={{ width: '10%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>Volumen</th>
-                    </>
-                  )}
-
-                  {tableView === 'technical' && (
-                    <>
-                      <th onClick={() => handleSort('rsi')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>RSI</th>
-                      <th onClick={() => handleSort('sma50')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>SMA50 %</th>
-                      <th onClick={() => handleSort('sma200')} style={{ width: '8%', textAlign: 'right', padding: '7px 4px', cursor: 'pointer' }}>SMA200 %</th>
-                    </>
-                  )}
-
-                  <th onClick={() => handleSort('quant_rating')} style={{ width: '12%', textAlign: 'center', padding: '7px 4px', cursor: 'pointer' }}>Quant Rating</th>
-                  <th style={{ width: '6%', textAlign: 'center', padding: '7px 4px' }}>Acción</th>
-                </>
-              )}
-
+                );
+              })}
+              <th style={{ width: tableView === 'custom' ? '3.4%' : '6%', textAlign: 'center', padding: tableView === 'custom' ? '7px 2px' : '7px 4px', fontSize: tableView === 'custom' ? '0.63rem' : '0.67rem', color: 'var(--text-secondary)' }}>
+                Acción
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -1654,7 +1840,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
             className="btn btn-secondary" 
             style={{ padding: '4px 8px', fontSize: '0.74rem' }}
             disabled={page === 1}
-            onClick={() => setPage(p => Math.max(1, p - 1))}
+            onClick={() => updateConfig({ page: Math.max(1, page - 1) })}
           >
             <ChevronLeft size={13} /> Anterior
           </button>
@@ -1677,7 +1863,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                   key={pNum}
                   className={`btn ${page === pNum ? 'btn-active' : 'btn-secondary'}`}
                   style={{ padding: '4px 9px', fontSize: '0.74rem', minWidth: '28px' }}
-                  onClick={() => setPage(pNum)}
+                  onClick={() => updateConfig({ page: pNum })}
                 >
                   {pNum}
                 </button>
@@ -1689,7 +1875,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
             className="btn btn-secondary" 
             style={{ padding: '4px 8px', fontSize: '0.74rem' }}
             disabled={page >= totalPages}
-            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            onClick={() => updateConfig({ page: Math.min(totalPages, page + 1) })}
           >
             Siguiente <ChevronRight size={13} />
           </button>
