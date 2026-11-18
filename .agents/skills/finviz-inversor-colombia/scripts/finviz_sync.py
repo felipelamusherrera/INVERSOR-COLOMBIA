@@ -2,7 +2,6 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #     "requests>=2.31.0",
-#     "supabase>=2.0.0",
 #     "pandas>=2.0.0",
 #     "python-dotenv>=1.0.0",
 # ]
@@ -22,9 +21,12 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests
+
+DEFAULT_SUPABASE_URL = "https://jptusquuyenbwrgasigt.supabase.co"
+DEFAULT_SUPABASE_KEY = "sb_publishable_DH3nRkidf1sVejfCN0naVg_z35CsuUU"
 
 # Cargar variables de entorno desde .env
 try:
@@ -199,16 +201,59 @@ def map_finviz_row(row: Dict[str, Any], snapshot_date_str: str) -> Dict[str, Any
     }
 
 
-def get_supabase_client():
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+def get_credentials() -> Tuple[str, str]:
+    url = os.environ.get("SUPABASE_URL") or DEFAULT_SUPABASE_URL
+    key = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or DEFAULT_SUPABASE_KEY
 
     if not url or not key:
-        print("ERROR: Faltan credenciales de Supabase en .env", file=sys.stderr)
+        print("ERROR: Faltan credenciales de Supabase en .env o variables de entorno", file=sys.stderr)
         sys.exit(1)
 
-    from supabase import create_client
-    return create_client(url, key)
+    return url.rstrip("/"), key
+
+
+def upsert_stocks_batch(base_url: str, api_key: str, batch: List[Dict[str, Any]], max_retries: int = 4) -> bool:
+    """Inserta o actualiza un lote de acciones en Supabase usando PostgREST de forma atómica y ligera."""
+    if not batch:
+        return True
+
+    url = f"{base_url}/rest/v1/inversor_colombia_stocks?on_conflict=ticker,snapshot_date"
+    headers = {
+        "apikey": api_key,
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(url, headers=headers, json=batch, timeout=35)
+            if resp.status_code in (200, 201, 204):
+                return True
+            else:
+                sys.stderr.write(
+                    f"Aviso HTTP {resp.status_code} al insertar lote ({len(batch)} items, intento {attempt + 1}/{max_retries}): {resp.text[:180]}\n"
+                )
+        except Exception as e:
+            sys.stderr.write(
+                f"Aviso de red/timeout al insertar lote ({len(batch)} items, intento {attempt + 1}/{max_retries}): {e}\n"
+            )
+
+        time.sleep(2 ** (attempt + 1))
+
+    # Si tras reintentos un lote grande sigue fallando (por timeout de base de datos o payload),
+    # se divide en dos sub-lotes para asegurar que no se pierdan los datos.
+    if len(batch) > 15:
+        mid = len(batch) // 2
+        sys.stderr.write(
+            f"Dividiendo lote de {len(batch)} registros en dos sub-lotes ({mid} y {len(batch) - mid}) para superar timeout...\n"
+        )
+        return (
+            upsert_stocks_batch(base_url, api_key, batch[:mid], max_retries=3) and
+            upsert_stocks_batch(base_url, api_key, batch[mid:], max_retries=3)
+        )
+
+    return False
 
 
 def _fetch_finviz_partition(
@@ -234,14 +279,23 @@ def _fetch_finviz_partition(
         r_val = (page - 1) * 20 + 1
         page_url = f"{base_url}&r={r_val}"
 
-        try:
-            resp = session.get(page_url, timeout=15)
-        except Exception as e:
-            sys.stderr.write(f"Error de conexión en página {page}: {e}\n")
-            break
+        resp = None
+        for attempt in range(4):
+            try:
+                resp = session.get(page_url, timeout=20)
+                if resp.status_code == 200:
+                    break
+                elif resp.status_code in (429, 500, 502, 503, 504):
+                    sys.stderr.write(f"[{filter_code}] Reintento {attempt + 1}/4 por status {resp.status_code} en página {page}...\n")
+                    time.sleep(2 * (attempt + 1))
+                else:
+                    break
+            except Exception as e:
+                sys.stderr.write(f"[{filter_code}] Reintento {attempt + 1}/4 por error de conexión en página {page}: {e}\n")
+                time.sleep(2 * (attempt + 1))
 
-        if resp.status_code != 200:
-            sys.stderr.write(f"Respuesta inesperada de Finviz (status {resp.status_code}) en página {page}\n")
+        if resp is None or resp.status_code != 200:
+            sys.stderr.write(f"Respuesta inesperada de Finviz (status {getattr(resp, 'status_code', 'None')}) en página {page}\n")
             break
 
         scripts = re.findall(r"<script[^>]*>(.*?)</script>", resp.text, re.DOTALL)
@@ -413,40 +467,51 @@ def cmd_push(args):
         print("Aviso: No hay registros en el archivo para sincronizar.")
         return
 
-    client = get_supabase_client()
+    base_url, api_key = get_credentials()
     table_name = "inversor_colombia_stocks"
 
-    sys.stderr.write(f"Conectado a Supabase. Sincronizando {len(records)} acciones...\n")
+    sys.stderr.write(f"Conectado a Supabase ({base_url}). Sincronizando {len(records)} acciones...\n")
 
-    batch_size = args.batch_size
+    batch_size = args.batch_size if args.batch_size else 100
     total_inserted = 0
+    failed_batches = 0
 
     for i in range(0, len(records), batch_size):
         batch = records[i:i + batch_size]
-        try:
-            client.table(table_name).upsert(batch, on_conflict="ticker,snapshot_date").execute()
+        ok = upsert_stocks_batch(base_url, api_key, batch)
+        if ok:
             total_inserted += len(batch)
             sys.stderr.write(f"Lote {total_inserted}/{len(records)} sincronizado en Supabase...\n")
-        except Exception as e:
-            print(f"ERROR insertando lote {i}-{i+len(batch)}: {e}", file=sys.stderr)
-            sys.exit(1)
+        else:
+            sys.stderr.write(f"ERROR: Falló definitivamente la inserción del lote {i}-{i+len(batch)}\n")
+            failed_batches += 1
 
-    print(f"Éxito: {total_inserted} acciones registradas en Supabase para hoy.")
+    if failed_batches > 0:
+        sys.stderr.write(f"Alerta: Se completó la sincronización con {failed_batches} lotes con error ({total_inserted}/{len(records)} acciones sincronizadas).\n")
+    else:
+        print(f"Éxito: {total_inserted} acciones registradas en Supabase para hoy.")
 
     # Mantenimiento de Ventana Móvil de 30 días
     retention_days = args.retention_days
     cutoff_date = (datetime.now(timezone.utc) - timedelta(days=retention_days)).date().isoformat()
     sys.stderr.write(f"Aplicando retención de {retention_days} días: purgando fechas anteriores a {cutoff_date}...\n")
 
-    try:
-        del_res = client.table(table_name).delete().lt("snapshot_date", cutoff_date).execute()
-        count = len(del_res.data) if hasattr(del_res, "data") and del_res.data else 0
-        if count > 0:
-            print(f"Limpieza: Se eliminaron {count} registros antiguos (> {retention_days} días).")
-        else:
-            print(f"Base de datos al día: No hay registros con más de {retention_days} días.")
-    except Exception as e:
-        sys.stderr.write(f"Aviso en limpieza de histórico: {e}\n")
+    purge_url = f"{base_url}/rest/v1/{table_name}?snapshot_date=lt.{cutoff_date}"
+    headers = {
+        "apikey": api_key,
+        "Authorization": f"Bearer {api_key}",
+        "Prefer": "return=minimal"
+    }
+    for attempt in range(3):
+        try:
+            resp = requests.delete(purge_url, headers=headers, timeout=25)
+            if resp.status_code in (200, 204):
+                print(f"Limpieza: Purgados exitosamente registros anteriores a {cutoff_date}.")
+                break
+        except Exception as e:
+            if attempt == 2:
+                sys.stderr.write(f"Aviso en limpieza de histórico: {e}\n")
+            time.sleep(2)
 
 
 def cmd_sync(args):
@@ -473,19 +538,41 @@ def cmd_sync(args):
 
 def cmd_test_connection(args):
     sys.stderr.write("Comprobando credenciales y conexión con Supabase...\n")
-    client = get_supabase_client()
+    base_url, api_key = get_credentials()
     table_name = "inversor_colombia_stocks"
 
+    headers = {
+        "apikey": api_key,
+        "Authorization": f"Bearer {api_key}"
+    }
+
     try:
-        res = client.table(table_name).select("ticker, company, snapshot_date", count="exact").limit(3).execute()
-        count = res.count if hasattr(res, "count") and res.count is not None else len(res.data)
+        url = f"{base_url}/rest/v1/{table_name}?select=ticker,company,snapshot_date&limit=3"
+        resp = requests.get(url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            print(f"ERROR al consultar '{table_name}': HTTP {resp.status_code} - {resp.text}", file=sys.stderr)
+            sys.exit(1)
+
         print("Conexión exitosa con Supabase!")
         print(f"Tabla '{table_name}' accesible.")
+
+        count_resp = requests.get(
+            f"{base_url}/rest/v1/{table_name}?select=ticker",
+            headers={**headers, "Range-Unit": "items", "Prefer": "count=exact"},
+            timeout=15
+        )
+        content_range = count_resp.headers.get("Content-Range", "")
+        count = content_range.split("/")[-1] if "/" in content_range else "N/A"
         print(f"Total de registros históricos almacenados: {count}")
 
         try:
-            v_res = client.table("inversor_colombia_latest").select("ticker, snapshot_date", count="exact").limit(3).execute()
-            latest_count = v_res.count if hasattr(v_res, "count") and v_res.count is not None else len(v_res.data)
+            v_resp = requests.get(
+                f"{base_url}/rest/v1/inversor_colombia_latest?select=ticker",
+                headers={**headers, "Range-Unit": "items", "Prefer": "count=exact"},
+                timeout=15
+            )
+            v_range = v_resp.headers.get("Content-Range", "")
+            latest_count = v_range.split("/")[-1] if "/" in v_range else "N/A"
             print(f"Vista 'inversor_colombia_latest' activa. Acciones únicas en el snapshot más reciente: {latest_count}")
         except Exception:
             pass
@@ -496,30 +583,44 @@ def cmd_test_connection(args):
 
 def cmd_backfill_prices(args):
     """Backfill de series temporales de 3 años para acciones en stock_prices_history."""
-    client = get_supabase_client()
+    base_url, api_key = get_credentials()
     table_name = "stock_prices_history"
+
+    headers = {
+        "apikey": api_key,
+        "Authorization": f"Bearer {api_key}"
+    }
 
     tickers = []
     if args.tickers:
         tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
     elif args.top:
-        res = client.table("inversor_colombia_latest").select("ticker").order("market_cap", desc=True).limit(args.top).execute()
-        tickers = [r["ticker"] for r in (res.data or []) if r.get("ticker")]
+        url = f"{base_url}/rest/v1/inversor_colombia_latest?select=ticker&order=market_cap.desc.nullslast&limit={args.top}"
+        resp = requests.get(url, headers=headers, timeout=15)
+        tickers = [r["ticker"] for r in (resp.json() if resp.status_code == 200 else []) if r.get("ticker")]
     else:
         print("ERROR: Debe especificar --tickers (ej: NVDA,AAPL) o --top (ej: 50)", file=sys.stderr)
         sys.exit(1)
 
     print(f"Iniciando precarga de 3 años de histórico para {len(tickers)} acciones...")
 
-    headers = {
+    y_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
 
     total_records = 0
+    upsert_url = f"{base_url}/rest/v1/{table_name}"
+    upsert_headers = {
+        "apikey": api_key,
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal"
+    }
+
     for idx, ticker in enumerate(tickers, 1):
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=3y&interval=1d"
         try:
-            resp = requests.get(url, headers=headers, timeout=10)
+            resp = requests.get(url, headers=y_headers, timeout=10)
             if resp.status_code != 200:
                 print(f"[{idx}/{len(tickers)}] {ticker}: Error HTTP {resp.status_code}")
                 continue
@@ -552,7 +653,7 @@ def cmd_backfill_prices(args):
 
             if rows:
                 for b in range(0, len(rows), 200):
-                    client.table(table_name).upsert(rows[b:b+200], on_conflict="ticker,price_date").execute()
+                    requests.post(upsert_url, headers=upsert_headers, json=rows[b:b+200], timeout=25)
                 total_records += len(rows)
                 print(f"[{idx}/{len(tickers)}] {ticker}: {len(rows)} días precargados exitosamente.")
 
@@ -584,7 +685,7 @@ def main():
     # push
     p_push = subparsers.add_parser("push")
     p_push.add_argument("--input", type=str, required=True)
-    p_push.add_argument("--batch-size", type=int, default=150)
+    p_push.add_argument("--batch-size", type=int, default=100)
     p_push.add_argument("--retention-days", type=int, default=30)
     p_push.set_defaults(func=cmd_push)
 
@@ -595,7 +696,7 @@ def main():
     p_sync.add_argument("--output", type=str, default="data/latest_snapshot.json")
     p_sync.add_argument("--filters", type=str, default=DEFAULT_FILTER_CODE)
     p_sync.add_argument("--order", type=str, default=DEFAULT_ORDER)
-    p_sync.add_argument("--batch-size", type=int, default=150)
+    p_sync.add_argument("--batch-size", type=int, default=100)
     p_sync.add_argument("--retention-days", type=int, default=30)
     p_sync.add_argument("--sleep", type=float, default=0.35)
     p_sync.set_defaults(func=cmd_sync)
