@@ -160,9 +160,12 @@ function AppContent() {
   };
 
   // Carga de datos desde Supabase
-  const loadStocks = async () => {
-    setLoading(true);
-    setError(null);
+  const loadStocks = async (silent: unknown = false) => {
+    const isSilent = silent === true;
+    if (!isSilent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       let allData: StockRecord[] = [];
       let from = 0;
@@ -222,21 +225,30 @@ function AppContent() {
           dates.sort().reverse();
           setSnapshotDate(dates[0]);
         }
-      } else {
+      } else if (!isSilent) {
         setStocks([]);
       }
     } catch (err: any) {
       console.error('Error loading stocks from Supabase:', err);
-      setError(err.message || 'Error de conexión con la base de datos de Supabase.');
+      if (!isSilent) {
+        setError(err.message || 'Error de conexión con la base de datos de Supabase.');
+      }
     } finally {
-      setLoading(false);
+      if (!isSilent) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     // Cargar datos del mercado solo si el usuario está autenticado y confirmado
     if (user && isEmailConfirmed) {
-      loadStocks();
+      loadStocks(false);
+      // Actualización automática silenciosa cada 15 min durante la sesión activa (sincronizaciones cada 2h y cierre)
+      const refreshTimer = window.setInterval(() => {
+        loadStocks(true);
+      }, 15 * 60 * 1000);
+      return () => window.clearInterval(refreshTimer);
     }
   }, [user, isEmailConfirmed]);
 

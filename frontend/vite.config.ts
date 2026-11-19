@@ -6,7 +6,10 @@ import path from 'path'
 const serverResponseCache = new Map<string, { reply: string; modelUsed: string; timestamp: number }>()
 const CACHE_TTL_MS = 15 * 60 * 1000
 
-function agentBackendServerPlugin(geminiApiKey: string): Plugin {
+function agentBackendServerPlugin(
+  geminiApiKey: string,
+  emailConfig: { resendApiKey: string; resendFromEmail: string; webhookUrl: string }
+): Plugin {
   return {
     name: 'inversor-colombia-agent-backend',
     configureServer(server) {
@@ -430,6 +433,92 @@ REGLAS ESTRICTAS DE AUDITORÍA Y PRECISIÓN:
           res.end(JSON.stringify({ error: err?.message || 'Error processing quarterly financials' }))
         }
       })
+
+      // Endpoint para despacho de correo institucional de Alertas de Precio
+      server.middlewares.use('/api/alerts/send-email', async (req, res) => {
+        if (req.method === 'OPTIONS') {
+          res.writeHead(200, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          })
+          res.end()
+          return
+        }
+
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Method Not Allowed' }))
+          return
+        }
+
+        const authHeader = req.headers['authorization']
+        if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'UNAUTHORIZED', message: 'Sesión requerida.' }))
+          return
+        }
+
+        try {
+          const chunks: Buffer[] = []
+          for await (const chunk of req) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+          }
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf-8') || '{}')
+          const toEmail = typeof body.toEmail === 'string' ? body.toEmail.trim() : ''
+          const subject = typeof body.subject === 'string' ? body.subject.slice(0, 200) : 'Alerta de Precio — Inversor Colombia'
+          const htmlBody = typeof body.htmlBody === 'string' ? body.htmlBody.slice(0, 40000) : ''
+
+          if (!toEmail) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ delivered: false, reason: 'MISSING_RECIPIENT' }))
+            return
+          }
+
+          if (emailConfig.resendApiKey) {
+            const resendRes = await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${emailConfig.resendApiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                from: emailConfig.resendFromEmail || 'Inversor Colombia <onboarding@resend.dev>',
+                to: [toEmail],
+                subject,
+                html: htmlBody,
+              }),
+            })
+
+            if (resendRes.ok) {
+              const resendData = (await resendRes.json()) as { id?: string }
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ delivered: true, provider: 'resend', id: resendData.id, recipient: toEmail }))
+              return
+            }
+          }
+
+          if (emailConfig.webhookUrl) {
+            const whRes = await fetch(emailConfig.webhookUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ to: toEmail, subject, html: htmlBody, ticker: body.ticker }),
+            })
+
+            if (whRes.ok) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ delivered: true, provider: 'webhook', recipient: toEmail }))
+              return
+            }
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ delivered: false, provider: 'fallback_to_edge', recipient: toEmail }))
+        } catch (err: unknown) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ delivered: false, reason: err instanceof Error ? err.message : 'SERVER_ERROR' }))
+        }
+      })
     },
   }
 }
@@ -440,10 +529,15 @@ export default defineConfig(({ mode }) => {
   const rootEnv = loadEnv(mode, path.resolve(process.cwd(), '..'), '')
   const localEnv = loadEnv(mode, process.cwd(), '')
   const serverGeminiKey = localEnv.GEMINI_API_KEY || rootEnv.GEMINI_API_KEY || ''
+  const emailConfig = {
+    resendApiKey: localEnv.RESEND_API_KEY || rootEnv.RESEND_API_KEY || process.env.RESEND_API_KEY || '',
+    resendFromEmail: localEnv.RESEND_FROM_EMAIL || rootEnv.RESEND_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || '',
+    webhookUrl: localEnv.ALERT_EMAIL_WEBHOOK_URL || rootEnv.ALERT_EMAIL_WEBHOOK_URL || process.env.ALERT_EMAIL_WEBHOOK_URL || '',
+  }
 
   return {
     base: './',
-    plugins: [react(), agentBackendServerPlugin(serverGeminiKey)],
+    plugins: [react(), agentBackendServerPlugin(serverGeminiKey, emailConfig)],
     server: {
       host: true,
       proxy: {

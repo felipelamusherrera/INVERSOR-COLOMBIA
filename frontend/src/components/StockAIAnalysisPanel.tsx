@@ -21,7 +21,9 @@ import {
   Award,
   RefreshCw,
   Bookmark,
-  Briefcase
+  Briefcase,
+  Globe2,
+  PieChart
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -44,6 +46,11 @@ import {
   fetchOfficialFinancials, 
   type OfficialFinancialsData 
 } from '../services/quarterlyFinancialsService';
+import {
+  getImmediateCompanyProfile,
+  fetchAIEnrichedCompanyProfile,
+  type CompanyStrategicProfile
+} from '../services/companyProfileService';
 
 interface StockAIAnalysisPanelProps {
   stock: StockRecord;
@@ -129,6 +136,28 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
       market_cap: 450000000000
     } as StockRecord;
   }, [peers, stock.ticker]);
+
+  // Perfil estratégico específico de la empresa (Misión, Visión, Revenue Mix, Competidores por mercado y Macro)
+  const [strategicProfile, setStrategicProfile] = useState<CompanyStrategicProfile>(() =>
+    getImmediateCompanyProfile(stock, peers)
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+    const immediate = getImmediateCompanyProfile(stock, peers);
+    setStrategicProfile(immediate);
+
+    if (immediate.sourceType === 'industry_model') {
+      fetchAIEnrichedCompanyProfile(stock, peers).then((enriched) => {
+        if (isMounted && enriched) {
+          setStrategicProfile(enriched);
+        }
+      });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [stock.ticker, stock.company, stock.sector, stock.industry]);
 
   // Métricas promedio del sector
   const sectorAverages = useMemo(() => {
@@ -445,13 +474,18 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
     return data;
   }, [stock, sectorAverages, peers]);
 
-  // Regenerar auditoría institucional en caliente
-  const handleRefreshAnalysis = () => {
+  // Regenerar auditoría institucional y enriquecimiento estratégico IA en caliente
+  const handleRefreshAnalysis = async () => {
     setIsRefreshing(true);
-    setTimeout(() => {
-      setIsRefreshing(false);
+    try {
+      const enriched = await fetchAIEnrichedCompanyProfile(stock, peers, true);
+      if (enriched) {
+        setStrategicProfile(enriched);
+      }
       toast.success(`Auditoría institucional IA recalculada exitosamente para ${stock.ticker}`);
-    }, 600);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const handleCopySheetsRow = () => {
@@ -734,65 +768,187 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
             </div>
           </div>
 
-          {/* 1. SECCIÓN: ¿A QUÉ SE DEDICA? */}
+          {/* 1. SECCIÓN: ¿A QUÉ SE DEDICA? — Misión, Visión, Mercados y Mix de Productos */}
           <div className="glass-panel" style={{ padding: '24px', border: '1px solid var(--border-subtle)', borderRadius: '14px' }}>
-            <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-cyan)', margin: '0 0 14px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Building2 size={18} /> 1. ¿A qué se dedica?
-            </h3>
-            <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.8, margin: 0 }}>
-              <strong style={{ color: '#fff' }}>{stock.company} ({stock.ticker})</strong> opera como un actor dominante y de referencia estratégica dentro del sector <strong style={{ color: 'var(--accent-cyan)' }}>{stock.sector}</strong>, focalizado principalmente en la industria de <strong style={{ color: 'var(--accent-cyan)' }}>{stock.industry}</strong>. Su modelo de negocio destaca por una sólida disciplina operativa con un margen neto del <strong style={{ color: 'var(--accent-green)' }}>{stock.profit_m ?? 16.5}%</strong> y una capacidad sostenida de generación de Flujo de Caja Libre anual estimada en <strong style={{ color: 'var(--accent-green)' }}>{financialData.fcfFormatted}</strong>. La cotización actual de <strong style={{ color: '#fff' }}>${financialData.price.toFixed(2)} USD</strong> proporciona un Margen de Seguridad del <strong style={{ color: financialData.marginOfSafety >= 0 ? 'var(--accent-green)' : '#f87171' }}>{financialData.marginOfSafety >= 0 ? `+${financialData.marginOfSafety}%` : `${financialData.marginOfSafety}%`}</strong> respecto a su Valor Intrínseco estimado de <strong style={{ color: 'var(--accent-cyan)' }}>${financialData.intrinsicValue} USD</strong>, configurando una ventana de oportunidad asimétrica para un horizonte swing a 3 meses.
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-cyan)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Building2 size={18} /> 1. ¿A qué se dedica? — Misión, Visión, Mercados y Líneas de Ingreso
+              </h3>
+              <span style={{
+                fontSize: '0.68rem',
+                fontWeight: 800,
+                padding: '3px 8px',
+                borderRadius: '6px',
+                background: strategicProfile.sourceType === 'industry_model' ? 'rgba(6, 182, 212, 0.12)' : 'rgba(16, 185, 129, 0.14)',
+                color: strategicProfile.sourceType === 'industry_model' ? 'var(--accent-cyan)' : 'var(--accent-green)',
+                border: '1px solid rgba(16, 185, 129, 0.25)'
+              }}>
+                {strategicProfile.sourceType === 'curated'
+                  ? 'Perfil Corporativo Verificado'
+                  : strategicProfile.sourceType === 'ai_enriched'
+                  ? 'Perfil Enriquecido con IA'
+                  : 'Modelo Sectorial Específico'}
+              </span>
+            </div>
+
+            <p style={{ fontSize: '0.92rem', color: '#e2e8f0', lineHeight: 1.75, margin: '0 0 16px 0' }}>
+              {strategicProfile.businessSummary}
             </p>
+
+            {/* Misión y Visión */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginBottom: '18px' }}>
+              <div style={{ background: '#070b14', padding: '14px 16px', borderRadius: '10px', border: '1px solid rgba(6, 182, 212, 0.25)' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '6px', letterSpacing: '0.04em' }}>
+                  Misión Corporativa
+                </div>
+                <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                  {strategicProfile.mission}
+                </div>
+              </div>
+
+              <div style={{ background: '#070b14', padding: '14px 16px', borderRadius: '10px', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--accent-green)', textTransform: 'uppercase', marginBottom: '6px', letterSpacing: '0.04em' }}>
+                  Visión Estratégica
+                </div>
+                <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                  {strategicProfile.vision}
+                </div>
+              </div>
+            </div>
+
+            {/* Mercados y Sectores donde Participa */}
+            <div style={{ marginBottom: '18px' }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#cbd5e1', textTransform: 'uppercase', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Globe2 size={14} color="var(--accent-cyan)" /> Mercados y Sectores en los que Participa
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {strategicProfile.participatingMarkets.map((mkt) => (
+                  <span
+                    key={mkt}
+                    style={{
+                      background: 'rgba(6, 182, 212, 0.1)',
+                      border: '1px solid rgba(6, 182, 212, 0.28)',
+                      color: '#67e8f9',
+                      padding: '4px 10px',
+                      borderRadius: '999px',
+                      fontSize: '0.76rem',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {mkt}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Principales Productos, Peso en los Ingresos (%) y Competidores Directos */}
+            <div>
+              <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#cbd5e1', textTransform: 'uppercase', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <PieChart size={14} color="var(--accent-green)" /> Estructura de Ingresos por Producto / Servicio y Competidores por Mercado
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {strategicProfile.revenueMix.map((seg) => (
+                  <div
+                    key={seg.productOrService}
+                    style={{
+                      background: '#070b14',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '10px',
+                      padding: '12px 16px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '6px' }}>
+                      <div>
+                        <span style={{ fontSize: '0.9rem', fontWeight: 800, color: '#fff' }}>
+                          {seg.productOrService}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', marginLeft: '10px', fontWeight: 600 }}>
+                          · {seg.marketOrSector}
+                        </span>
+                      </div>
+                      <span className="font-mono" style={{
+                        fontSize: '0.86rem',
+                        fontWeight: 900,
+                        color: 'var(--accent-green)',
+                        background: 'rgba(16, 185, 129, 0.14)',
+                        padding: '2px 9px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(16, 185, 129, 0.3)',
+                      }}>
+                        {seg.revenueSharePct}% de Ingresos
+                      </span>
+                    </div>
+
+                    {/* Barra visual de peso en los ingresos */}
+                    <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '4px', overflow: 'hidden', marginBottom: '8px' }}>
+                      <div style={{
+                        width: `${Math.min(100, Math.max(4, seg.revenueSharePct))}%`,
+                        height: '100%',
+                        background: 'linear-gradient(90deg, #10b981, #06b6d4)',
+                        borderRadius: '4px',
+                      }} />
+                    </div>
+
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: '8px' }}>
+                      {seg.description}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', fontSize: '0.74rem' }}>
+                      <span style={{ color: '#f59e0b', fontWeight: 700 }}>Compite con:</span>
+                      {seg.competitors.map((comp) => (
+                        <span
+                          key={comp}
+                          style={{
+                            background: 'rgba(245, 158, 11, 0.1)',
+                            border: '1px solid rgba(245, 158, 11, 0.25)',
+                            color: '#fcd34d',
+                            padding: '2px 7px',
+                            borderRadius: '5px',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {comp}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* 2 & 3. SECCIÓN: POSICIÓN COMPETITIVA Y RIVAL PRINCIPAL */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
             
-            {/* 2. Posición Competitiva (Motores Core) */}
+            {/* 2. Posición Competitiva (Análisis Propio de Foso Económico / Moat) */}
             <div className="glass-panel" style={{ padding: '22px', border: '1px solid var(--border-subtle)', borderRadius: '14px' }}>
-              <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Award size={18} color="var(--accent-cyan)" /> 2. Posición Competitiva
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Award size={18} color="var(--accent-cyan)" /> 2. Posición Competitiva & Ventaja Diferencial
               </h3>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
-                <div style={{ background: '#070b14', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--accent-cyan)', fontWeight: 800 }}>MOTOR CORE 1</div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', margin: '4px 0' }}>
-                    Liderazgo en Infraestructura
-                  </div>
-                  <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-                    Escala de balance y posición de foso consolidada en {stock.industry}.
-                  </div>
-                </div>
+              <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.65, margin: '0 0 14px 0' }}>
+                {strategicProfile.competitivePositionSummary}
+              </p>
 
-                <div style={{ background: '#070b14', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--accent-green)', fontWeight: 800 }}>MOTOR CORE 2</div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', margin: '4px 0' }}>
-                    Poder de Fijación de Precios
-                  </div>
-                  <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-                    Margen bruto defensivo del {stock.gross_m ?? 48}% frente a ciclos de inflación.
-                  </div>
-                </div>
-
-                <div style={{ background: '#070b14', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-                  <div style={{ fontSize: '0.72rem', color: '#f59e0b', fontWeight: 800 }}>MOTOR CORE 3</div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', margin: '4px 0' }}>
-                    Eficiencia de Capital
-                  </div>
-                  <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-                    ROIC del {stock.roic ? stock.roic.toFixed(1) + '%' : '18.2%'}, superando a sus competidores.
-                  </div>
-                </div>
-
-                <div style={{ background: '#070b14', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-                  <div style={{ fontSize: '0.72rem', color: '#ec4899', fontWeight: 800 }}>MOTOR CORE 4</div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', margin: '4px 0' }}>
-                    Fidelidad y Retención
-                  </div>
-                  <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-                    Baja tasa de pérdida de clientes y alta visibilidad contractual recurrente.
-                  </div>
-                </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+                {strategicProfile.competitiveAdvantages.map((pillar, idx) => {
+                  const accentColors = ['var(--accent-cyan)', 'var(--accent-green)', '#f59e0b', '#ec4899'];
+                  const color = accentColors[idx % accentColors.length];
+                  return (
+                    <div key={pillar.title} style={{ background: '#070b14', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                      <div style={{ fontSize: '0.70rem', color, fontWeight: 800 }}>PILAR DIFERENCIAL {idx + 1}</div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', margin: '4px 0' }}>
+                        {pillar.title}
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: '6px' }}>
+                        {pillar.moatMechanism}
+                      </div>
+                      <div style={{ fontSize: '0.70rem', color: '#94a3b8', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '5px' }}>
+                        {pillar.evidence}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -826,38 +982,73 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
 
           </div>
 
-          {/* 4. SECCIÓN: POTENCIAL FUTURO DEL SECTOR */}
+          {/* 4. SECCIÓN: POTENCIAL FUTURO DEL SECTOR, IMPACTO Y FACTORES MACROECONÓMICOS */}
           <div className="glass-panel" style={{ padding: '24px', border: '1px solid var(--border-subtle)', borderRadius: '14px' }}>
             <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-green)', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <TrendingUp size={18} /> 4. Potencial Futuro del Sector & Hechos Confirmados
+              <TrendingUp size={18} /> 4. Potencial Futuro del Sector, Impacto Socioeconómico y Factores Macroeconómicos
             </h3>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px', marginBottom: '16px' }}>
-              <div style={{ background: '#070b14', padding: '14px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
-                <span style={{ fontSize: '0.70rem', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--accent-green)', padding: '2px 6px', borderRadius: '4px', fontWeight: 800 }}>
-                  [CONFIRMADO]
-                </span>
-                <div style={{ fontSize: '0.84rem', color: '#fff', fontWeight: 600, marginTop: '8px', lineHeight: 1.5 }}>
-                  Flujo de Caja Libre anual consolidado en {financialData.fcfFormatted} {financialData.isFcfAudited && <span style={{ color: '#10b981', fontSize: '0.70rem', background: 'rgba(16,185,129,0.15)', padding: '2px 6px', borderRadius: '4px', marginLeft: '6px' }}>SEC US-GAAP Auditado</span>}, con un margen FCF robusto del {financialData.fcfMargin}%.
+            {/* Objetivos Estratégicos del Sector + Impacto Económico/Social */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px', marginBottom: '18px' }}>
+              <div style={{ background: '#070b14', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--accent-green)', textTransform: 'uppercase', marginBottom: '10px' }}>
+                  Principales Objetivos Estratégicos del Sector ({stock.industry || stock.sector})
                 </div>
+                <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.65 }}>
+                  {strategicProfile.sectorFutureObjectives.map((obj) => (
+                    <li key={obj} style={{ marginBottom: '6px' }}>{obj}</li>
+                  ))}
+                </ul>
               </div>
 
-              <div style={{ background: '#070b14', padding: '14px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
-                <span style={{ fontSize: '0.70rem', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--accent-green)', padding: '2px 6px', borderRadius: '4px', fontWeight: 800 }}>
-                  [CONFIRMADO]
-                </span>
-                <div style={{ fontSize: '0.84rem', color: '#fff', fontWeight: 600, marginTop: '8px', lineHeight: 1.5 }}>
-                  Margen de seguridad institucional del {financialData.marginOfSafety >= 0 ? `+${financialData.marginOfSafety}%` : `${financialData.marginOfSafety}%`} frente al Valor Intrínseco estimado de ${financialData.intrinsicValue} USD.
+              <div style={{ background: '#070b14', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '10px' }}>
+                  Impacto en la Economía y en la Sociedad
                 </div>
+                <p style={{ fontSize: '0.84rem', color: '#e2e8f0', lineHeight: 1.65, margin: 0 }}>
+                  {strategicProfile.economicAndSocialImpact}
+                </p>
               </div>
+            </div>
 
-              <div style={{ background: '#070b14', padding: '14px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
-                <span style={{ fontSize: '0.70rem', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--accent-green)', padding: '2px 6px', borderRadius: '4px', fontWeight: 800 }}>
-                  [CONFIRMADO]
-                </span>
-                <div style={{ fontSize: '0.84rem', color: '#fff', fontWeight: 600, marginTop: '8px', lineHeight: 1.5 }}>
-                  Alineación de impulso con el ETF sectorial {sectorEtf.ticker} ({sectorEtf.perf}) y régimen VIX favorable para swing trading.
-                </div>
+            {/* Factores Macroeconómicos */}
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#cbd5e1', textTransform: 'uppercase', marginBottom: '10px' }}>
+                Principales Factores Macroeconómicos que Afectan a {stock.ticker}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
+                {strategicProfile.macroFactors.map((macro) => {
+                  const badgeColor =
+                    macro.sensitivity === 'Alta'
+                      ? '#f59e0b'
+                      : macro.sensitivity === 'Favorable'
+                      ? '#10b981'
+                      : macro.sensitivity === 'Directa'
+                      ? '#38bdf8'
+                      : '#a78bfa';
+                  return (
+                    <div key={macro.factor} style={{ background: '#070b14', padding: '14px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '0.83rem', fontWeight: 800, color: '#fff' }}>{macro.factor}</span>
+                        <span style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 800,
+                          color: badgeColor,
+                          background: 'rgba(255,255,255,0.05)',
+                          border: `1px solid ${badgeColor}`,
+                          padding: '2px 7px',
+                          borderRadius: '999px',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          Sensibilidad: {macro.sensitivity}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                        {macro.explanation}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -870,7 +1061,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
               color: 'var(--text-secondary)'
             }}>
               <strong style={{ color: 'var(--accent-red)' }}>Riesgos a Vigilar en el Sector: </strong>
-              Potencial endurecimiento regulatorio, volatilidad en tipos de interés o presiones competitivas en costos de insumos en {stock.industry}.
+              {strategicProfile.sectorRisks}
             </div>
           </div>
 

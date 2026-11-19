@@ -10,15 +10,20 @@ import {
   BellRing,
   Trash2,
   X,
-  Briefcase
+  Briefcase,
+  Mail,
+  BarChart2,
+  GitCompare
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
   ComposedChart,
+  BarChart,
   AreaChart, 
   Area, 
   Bar,
   Line,
+  Cell,
   XAxis, 
   YAxis, 
   Tooltip, 
@@ -26,9 +31,16 @@ import {
   CartesianGrid, 
   ReferenceLine 
 } from 'recharts';
+import { toast } from 'sonner';
 import type { StockRecord } from '../types/stock';
 import { calculateFactorGrades } from '../utils/quantRatings';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
+import {
+  sendPriceAlertEmail,
+  buildPriceAlertEmailHtml,
+  type PriceAlertEmailResult
+} from '../services/priceAlertEmailService';
 import { TradingViewChart } from './TradingViewChart';
 import { CandlestickChart } from './CandlestickChart';
 import { SectorNewsRadar } from './SectorNewsRadar';
@@ -275,6 +287,276 @@ export function generateQuarterlyFinancials(stock: StockRecord): QuarterlyFinanc
   return buildQuarterlySeries(stock);
 }
 
+export interface VariabilityPoint {
+  horizon: string;
+  shortLabel: string;
+  changePct: number;
+  changeUsd: number;
+  sourceNote: string;
+}
+
+function computePriceVariabilitySeries(
+  stock: StockRecord,
+  rawPoints: PricePoint[],
+  intraday4hPct: number | null
+): VariabilityPoint[] {
+  const currentPrice = stock.price ?? rawPoints[rawPoints.length - 1]?.price ?? 0;
+  const calcUsdDelta = (pct: number) => {
+    if (!currentPrice || 1 + pct / 100 <= 0) return 0;
+    const base = currentPrice / (1 + pct / 100);
+    return Number((currentPrice - base).toFixed(2));
+  };
+
+  // 1. 4 Horas
+  let pct4h = 0;
+  let note4h = 'Estimación sesión intradía';
+  if (intraday4hPct !== null) {
+    pct4h = intraday4hPct;
+    note4h = 'Horario 1H real';
+  } else if (stock.change_from_open_pct !== undefined && stock.change_from_open_pct !== null) {
+    pct4h = stock.change_from_open_pct;
+    note4h = 'Apertura intradía';
+  } else {
+    pct4h = Number(((stock.change_pct ?? 0) * 0.65).toFixed(2));
+  }
+
+  // 2. 1 Día
+  let pct1d = stock.change_pct ?? null;
+  let note1d = 'Sesión diaria Finviz';
+  if (pct1d === null && rawPoints.length >= 2) {
+    const pLast = rawPoints[rawPoints.length - 1].price ?? currentPrice;
+    const pPrev = rawPoints[rawPoints.length - 2].price ?? pLast;
+    pct1d = pPrev > 0 ? ((pLast - pPrev) / pPrev) * 100 : 0;
+    note1d = 'Histórico diario';
+  }
+  const final1d = Number((pct1d ?? 0).toFixed(2));
+
+  // 3. 3 Días
+  let pct3d: number | null = null;
+  let note3d = 'Histórico 3 sesiones';
+  if (rawPoints.length >= 4) {
+    const pLast = currentPrice || (rawPoints[rawPoints.length - 1].price ?? 0);
+    const p3 = rawPoints[rawPoints.length - 4].price ?? pLast;
+    if (p3 > 0) pct3d = ((pLast - p3) / p3) * 100;
+  }
+  if (pct3d === null) {
+    pct3d = stock.perf_week !== undefined && stock.perf_week !== null ? stock.perf_week * 0.6 : final1d * 1.6;
+    note3d = 'Estimado proporcional';
+  }
+  const final3d = Number(pct3d.toFixed(2));
+
+  // 4. 1 Semana
+  let pct1w = stock.perf_week ?? null;
+  let note1w = 'Rendimiento semanal';
+  if (pct1w === null && rawPoints.length >= 6) {
+    const pLast = currentPrice || (rawPoints[rawPoints.length - 1].price ?? 0);
+    const p5 = rawPoints[rawPoints.length - 6].price ?? pLast;
+    if (p5 > 0) pct1w = ((pLast - p5) / p5) * 100;
+    note1w = 'Histórico 5 sesiones';
+  }
+  const final1w = Number((pct1w ?? final3d * 1.4).toFixed(2));
+
+  // 5. 1 Mes
+  let pct1m = stock.perf_month ?? null;
+  let note1m = 'Rendimiento mensual';
+  if (pct1m === null && rawPoints.length >= 22) {
+    const pLast = currentPrice || (rawPoints[rawPoints.length - 1].price ?? 0);
+    const p21 = rawPoints[rawPoints.length - 22].price ?? pLast;
+    if (p21 > 0) pct1m = ((pLast - p21) / p21) * 100;
+    note1m = 'Histórico 21 sesiones';
+  }
+  const final1m = Number((pct1m ?? final1w * 2.2).toFixed(2));
+
+  return [
+    { horizon: '4 Horas', shortLabel: '4H', changePct: Number(pct4h.toFixed(2)), changeUsd: calcUsdDelta(pct4h), sourceNote: note4h },
+    { horizon: '1 Día', shortLabel: '1D', changePct: final1d, changeUsd: calcUsdDelta(final1d), sourceNote: note1d },
+    { horizon: '3 Días', shortLabel: '3D', changePct: final3d, changeUsd: calcUsdDelta(final3d), sourceNote: note3d },
+    { horizon: '1 Semana', shortLabel: '1S', changePct: final1w, changeUsd: calcUsdDelta(final1w), sourceNote: note1w },
+    { horizon: '1 Mes', shortLabel: '1M', changePct: final1m, changeUsd: calcUsdDelta(final1m), sourceNote: note1m },
+  ];
+}
+
+export interface DivergenceAnalysisResult {
+  hasEnoughData: boolean;
+  windowSessions: number;
+  degreePct: number;
+  severity: 'Alta' | 'Moderada' | 'Baja / Nula';
+  classification: string;
+  directionColor: string;
+  diagnosis: string;
+  highs: {
+    prevPrice: number;
+    prevDate: string;
+    recentPrice: number;
+    recentDate: string;
+    priceDeltaPct: number;
+    prevRsi: number;
+    recentRsi: number;
+    rsiDeltaPts: number;
+    isDivergent: boolean;
+  };
+  lows: {
+    prevPrice: number;
+    prevDate: string;
+    recentPrice: number;
+    recentDate: string;
+    priceDeltaPct: number;
+    prevRsi: number;
+    recentRsi: number;
+    rsiDeltaPts: number;
+    isDivergent: boolean;
+  };
+}
+
+function computePriceRsiDivergence(rawPoints: PricePoint[]): DivergenceAnalysisResult {
+  const valid = rawPoints
+    .slice(-90)
+    .filter(
+      (p) =>
+        p.rsi !== undefined &&
+        p.rsi !== null &&
+        !isNaN(p.rsi) &&
+        (p.price ?? p.close) !== undefined &&
+        (p.price ?? p.close)! > 0
+    );
+
+  if (valid.length < 12) {
+    return {
+      hasEnoughData: false,
+      windowSessions: valid.length,
+      degreePct: 0,
+      severity: 'Baja / Nula',
+      classification: 'Datos insuficientes para cruce de extremos',
+      directionColor: '#94a3b8',
+      diagnosis: 'Se requieren al menos 12 sesiones con histórico de Precio y RSI (14) para contrastar máximos y mínimos entre dos ciclos.',
+      highs: { prevPrice: 0, prevDate: '-', recentPrice: 0, recentDate: '-', priceDeltaPct: 0, prevRsi: 0, recentRsi: 0, rsiDeltaPts: 0, isDivergent: false },
+      lows: { prevPrice: 0, prevDate: '-', recentPrice: 0, recentDate: '-', priceDeltaPct: 0, prevRsi: 0, recentRsi: 0, rsiDeltaPts: 0, isDivergent: false },
+    };
+  }
+
+  const mid = Math.floor(valid.length / 2);
+  const firstHalf = valid.slice(0, mid);
+  const secondHalf = valid.slice(mid);
+
+  const findExtremes = (slice: PricePoint[]) => {
+    let maxPricePt = slice[0];
+    let minPricePt = slice[0];
+    let maxRsiPt = slice[0];
+    let minRsiPt = slice[0];
+
+    for (const pt of slice) {
+      const pHi = pt.high ?? pt.price ?? pt.close ?? 0;
+      const pLo = pt.low ?? pt.price ?? pt.close ?? 0;
+      const bestHi = maxPricePt.high ?? maxPricePt.price ?? maxPricePt.close ?? 0;
+      const bestLo = minPricePt.low ?? minPricePt.price ?? minPricePt.close ?? 0;
+
+      if (pHi > bestHi) maxPricePt = pt;
+      if (pLo < bestLo) minPricePt = pt;
+      if ((pt.rsi ?? 0) > (maxRsiPt.rsi ?? 0)) maxRsiPt = pt;
+      if ((pt.rsi ?? 100) < (minRsiPt.rsi ?? 100)) minRsiPt = pt;
+    }
+
+    return {
+      maxPrice: Number((maxPricePt.high ?? maxPricePt.price ?? maxPricePt.close ?? 0).toFixed(2)),
+      maxPriceDate: maxPricePt.date,
+      minPrice: Number((minPricePt.low ?? minPricePt.price ?? minPricePt.close ?? 0).toFixed(2)),
+      minPriceDate: minPricePt.date,
+      maxRsi: Number((maxRsiPt.rsi ?? 50).toFixed(1)),
+      minRsi: Number((minRsiPt.rsi ?? 50).toFixed(1)),
+    };
+  };
+
+  const ext1 = findExtremes(firstHalf);
+  const ext2 = findExtremes(secondHalf);
+
+  const priceHighDeltaPct = ext1.maxPrice > 0 ? Number((((ext2.maxPrice - ext1.maxPrice) / ext1.maxPrice) * 100).toFixed(2)) : 0;
+  const rsiHighDeltaPts = Number((ext2.maxRsi - ext1.maxRsi).toFixed(1));
+  const priceLowDeltaPct = ext1.minPrice > 0 ? Number((((ext2.minPrice - ext1.minPrice) / ext1.minPrice) * 100).toFixed(2)) : 0;
+  const rsiLowDeltaPts = Number((ext2.minRsi - ext1.minRsi).toFixed(1));
+
+  // Divergencia clásica bajista en máximos: Precio hace máximo más alto, RSI hace máximo más bajo
+  const classicBearishHigh = priceHighDeltaPct > 0.3 && rsiHighDeltaPts < -1.0;
+  const bearishScore = classicBearishHigh
+    ? Math.min(100, Math.round(Math.min(15, Math.abs(priceHighDeltaPct)) * 3.0 + Math.min(25, Math.abs(rsiHighDeltaPts)) * 2.2))
+    : 0;
+
+  // Divergencia clásica alcista en mínimos: Precio hace mínimo más bajo, RSI hace mínimo más alto
+  const classicBullishLow = priceLowDeltaPct < -0.3 && rsiLowDeltaPts > 1.0;
+  const bullishScore = classicBullishLow
+    ? Math.min(100, Math.round(Math.min(15, Math.abs(priceLowDeltaPct)) * 3.0 + Math.min(25, Math.abs(rsiLowDeltaPts)) * 2.2))
+    : 0;
+
+  // Divergencias ocultas (de continuación)
+  const hiddenBullishLow = !classicBullishLow && priceLowDeltaPct > 0.5 && rsiLowDeltaPts < -1.5;
+  const hiddenBullScore = hiddenBullishLow
+    ? Math.min(85, Math.round(Math.min(12, Math.abs(priceLowDeltaPct)) * 2.4 + Math.min(20, Math.abs(rsiLowDeltaPts)) * 1.8))
+    : 0;
+
+  const hiddenBearishHigh = !classicBearishHigh && priceHighDeltaPct < -0.5 && rsiHighDeltaPts > 1.5;
+  const hiddenBearScore = hiddenBearishHigh
+    ? Math.min(85, Math.round(Math.min(12, Math.abs(priceHighDeltaPct)) * 2.4 + Math.min(20, Math.abs(rsiHighDeltaPts)) * 1.8))
+    : 0;
+
+  const degreePct = Math.max(bearishScore, bullishScore, hiddenBullScore, hiddenBearScore);
+  const severity: DivergenceAnalysisResult['severity'] =
+    degreePct >= 55 ? 'Alta' : degreePct >= 25 ? 'Moderada' : 'Baja / Nula';
+
+  let classification = 'Convergencia (Tendencia Confirmada)';
+  let directionColor = '#06b6d4';
+  let diagnosis =
+    'Los máximos y mínimos del precio están acompañados en la misma dirección por el RSI (14), confirmando coherencia de impulso sin señales fuertes de agotamiento por divergencia.';
+
+  if (classicBullishLow && bullishScore >= bearishScore) {
+    classification = 'Divergencia Alcista Clásica (Mínimos)';
+    directionColor = '#10b981';
+    diagnosis = `El precio marcó un mínimo más bajo (${priceLowDeltaPct}%), pero el RSI formó un mínimo más alto (+${rsiLowDeltaPts} pts). Indica pérdida de presión vendedora y potencial giro alcista.`;
+  } else if (classicBearishHigh && bearishScore > bullishScore) {
+    classification = 'Divergencia Bajista Clásica (Máximos)';
+    directionColor = '#ef4444';
+    diagnosis = `El precio alcanzó un máximo superior (+${priceHighDeltaPct}%), pero el RSI registró un máximo descendente (${rsiHighDeltaPts} pts). Señal de debilitamiento del impulso comprador y riesgo de toma de beneficios.`;
+  } else if (hiddenBullishLow && hiddenBullScore >= hiddenBearScore) {
+    classification = 'Divergencia Alcista Oculta (Continuación)';
+    directionColor = '#34d399';
+    diagnosis = `El precio mantiene mínimos crecientes (+${priceLowDeltaPct}%) mientras el RSI descomprime (${rsiLowDeltaPts} pts), patrón compatible con consolidación dentro de tendencia alcista.`;
+  } else if (hiddenBearishHigh) {
+    classification = 'Divergencia Bajista Oculta (Continuación)';
+    directionColor = '#f59e0b';
+    diagnosis = `El precio marca máximos descendentes (${priceHighDeltaPct}%) mientras el RSI rebota (+${rsiHighDeltaPts} pts), sugiriendo resistencia técnica vigente.`;
+  }
+
+  return {
+    hasEnoughData: true,
+    windowSessions: valid.length,
+    degreePct,
+    severity,
+    classification,
+    directionColor,
+    diagnosis,
+    highs: {
+      prevPrice: ext1.maxPrice,
+      prevDate: ext1.maxPriceDate,
+      recentPrice: ext2.maxPrice,
+      recentDate: ext2.maxPriceDate,
+      priceDeltaPct: priceHighDeltaPct,
+      prevRsi: ext1.maxRsi,
+      recentRsi: ext2.maxRsi,
+      rsiDeltaPts: rsiHighDeltaPts,
+      isDivergent: classicBearishHigh || hiddenBearishHigh,
+    },
+    lows: {
+      prevPrice: ext1.minPrice,
+      prevDate: ext1.minPriceDate,
+      recentPrice: ext2.minPrice,
+      recentDate: ext2.minPriceDate,
+      priceDeltaPct: priceLowDeltaPct,
+      prevRsi: ext1.minRsi,
+      recentRsi: ext2.minRsi,
+      rsiDeltaPts: rsiLowDeltaPts,
+      isDivergent: classicBullishLow || hiddenBullishLow,
+    },
+  };
+}
+
 interface StockDetailProps {
   stock: StockRecord;
   onBack: () => void;
@@ -295,6 +577,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
   allStocks,
   onTriggerAgentPrompt
 }) => {
+  const { user } = useAuth();
   const analysis = calculateFactorGrades(stock);
 
   // Próxima Fecha de Dividendo (Ex-Dividendo) calculada o proyectada
@@ -356,7 +639,17 @@ export const StockDetail: React.FC<StockDetailProps> = ({
   const [newAlertPrice, setNewAlertPrice] = useState<number>(stock.price || 100);
   const [newAlertCondition, setNewAlertCondition] = useState<'ABOVE' | 'BELOW'>('ABOVE');
   const [newAlertNote, setNewAlertNote] = useState('');
-  const [triggeredToast, setTriggeredToast] = useState<{ ticker: string; message: string; note?: string } | null>(null);
+  const [triggeredToast, setTriggeredToast] = useState<{
+    ticker: string;
+    message: string;
+    note?: string;
+    emailStatus?: string;
+    emailResult?: PriceAlertEmailResult;
+  } | null>(null);
+  const [lastAlertEmailPreview, setLastAlertEmailPreview] = useState<PriceAlertEmailResult | null>(null);
+  const [showEmailPreviewModal, setShowEmailPreviewModal] = useState(false);
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
+  const [intraday4hPct, setIntraday4hPct] = useState<number | null>(null);
 
   // Alertas específicas para este activo
   const activeAlertsForStock = useMemo(() => {
@@ -370,38 +663,145 @@ export const StockDetail: React.FC<StockDetailProps> = ({
     }
   }, [stock.price]);
 
-  // Detector en vivo de cruce de alertas
+  // Detector en vivo de cruce de alertas + despacho automático de correo institucional
   useEffect(() => {
     if (!stock.price) return;
     const currentPrice = stock.price;
+    const toTrigger = alerts.filter((a) => {
+      if (a.ticker !== stock.ticker || a.triggered) return false;
+      const crossedAbove = a.condition === 'ABOVE' && currentPrice >= a.targetPrice;
+      const crossedBelow = a.condition === 'BELOW' && currentPrice <= a.targetPrice;
+      return crossedAbove || crossedBelow;
+    });
 
-    setAlerts(prevAlerts => {
-      let changed = false;
-      const next = prevAlerts.map(a => {
-        if (a.ticker === stock.ticker && !a.triggered) {
-          const crossedAbove = a.condition === 'ABOVE' && currentPrice >= a.targetPrice;
-          const crossedBelow = a.condition === 'BELOW' && currentPrice <= a.targetPrice;
+    if (toTrigger.length === 0) return;
 
-          if (crossedAbove || crossedBelow) {
-            changed = true;
-            playAlertBeep();
-            setTriggeredToast({
-              ticker: a.ticker,
-              message: `¡Alerta Ejecutada! ${a.ticker} cotiza a $${currentPrice.toFixed(2)} USD (cruzó tu umbral de $${a.targetPrice.toFixed(2)} USD)`,
-              note: a.note
-            });
-            return { ...a, triggered: true, triggeredAt: new Date().toISOString() };
+    const triggerIds = new Set(toTrigger.map((a) => a.id));
+    const nowIso = new Date().toISOString();
+    const nextAlerts = alerts.map((a) =>
+      triggerIds.has(a.id) ? { ...a, triggered: true, triggeredAt: nowIso } : a
+    );
+    setAlerts(nextAlerts);
+    localStorage.setItem('inversor_colombia_alerts', JSON.stringify(nextAlerts));
+    playAlertBeep();
+
+    const first = toTrigger[0];
+    const recipientEmail = user?.email || '';
+    setTriggeredToast({
+      ticker: first.ticker,
+      message: `¡Alerta Ejecutada! ${first.ticker} cotiza a $${currentPrice.toFixed(2)} USD (cruzó tu umbral de $${first.targetPrice.toFixed(2)} USD)`,
+      note: first.note,
+      emailStatus: recipientEmail ? `Enviando correo institucional a ${recipientEmail}...` : undefined,
+    });
+
+    if (recipientEmail) {
+      toTrigger.forEach((alertItem) => {
+        sendPriceAlertEmail({
+          toEmail: recipientEmail,
+          ticker: alertItem.ticker,
+          company: stock.company || alertItem.ticker,
+          currentPrice,
+          targetPrice: alertItem.targetPrice,
+          condition: alertItem.condition,
+          note: alertItem.note,
+        }).then((emailRes) => {
+          setLastAlertEmailPreview(emailRes);
+          setTriggeredToast((prev) =>
+            prev && prev.ticker === alertItem.ticker
+              ? {
+                  ...prev,
+                  emailStatus: emailRes.delivered
+                    ? `Correo enviado a ${emailRes.recipient}`
+                    : `Vista previa lista para ${emailRes.recipient}`,
+                  emailResult: emailRes,
+                }
+              : prev
+          );
+          if (emailRes.delivered) {
+            toast.success(`Correo de alerta enviado a ${emailRes.recipient}`);
+          }
+        });
+      });
+    }
+  }, [stock.price, stock.ticker, stock.company, alerts, user?.email]);
+
+  const handlePreviewOrTestAlertEmail = async () => {
+    const recipientEmail = user?.email || 'inversionista@inversorcolombia.com';
+    const currentPrice = stock.price || newAlertPrice || 100;
+    const targetPrice = newAlertPrice || currentPrice;
+    const htmlBody = buildPriceAlertEmailHtml({
+      toEmail: recipientEmail,
+      ticker: stock.ticker,
+      company: stock.company || stock.ticker,
+      currentPrice,
+      targetPrice,
+      condition: newAlertCondition,
+      note: newAlertNote.trim() || undefined,
+      appUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+    });
+
+    const previewResult: PriceAlertEmailResult = {
+      delivered: false,
+      provider: 'preview',
+      recipient: recipientEmail,
+      subject: `🚨 Alerta de Precio ${stock.ticker}: $${currentPrice.toFixed(2)} USD — Inversor Colombia`,
+      htmlBody,
+    };
+
+    if (user?.email) {
+      setSendingTestEmail(true);
+      try {
+        const res = await sendPriceAlertEmail({
+          toEmail: user.email,
+          ticker: stock.ticker,
+          company: stock.company || stock.ticker,
+          currentPrice,
+          targetPrice,
+          condition: newAlertCondition,
+          note: newAlertNote.trim() || 'Prueba de presentación institucional de alerta',
+        });
+        setLastAlertEmailPreview(res);
+        setShowEmailPreviewModal(true);
+        if (res.delivered) {
+          toast.success(`Correo de prueba enviado a ${res.recipient}`);
+        } else {
+          toast.info(`Vista previa institucional generada para ${res.recipient}`);
+        }
+        return;
+      } finally {
+        setSendingTestEmail(false);
+      }
+    }
+
+    setLastAlertEmailPreview(previewResult);
+    setShowEmailPreviewModal(true);
+  };
+
+  // Consultar barras horarias (1H) para obtener variación exacta de las últimas 4 Horas
+  useEffect(() => {
+    let isMounted = true;
+    setIntraday4hPct(null);
+    fetch(`/api/chart/${stock.ticker}?range=5d&interval=1h`)
+      .then((res) => (res && res.ok && (res.headers.get('content-type') || '').includes('json') ? res.json() : null))
+      .then((json) => {
+        if (!isMounted || !json) return;
+        const closes: (number | null)[] = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
+        const valid = closes.filter((c): c is number => typeof c === 'number' && c > 0);
+        if (valid.length >= 5) {
+          const last = valid[valid.length - 1];
+          const prev4h = valid[valid.length - 5];
+          if (prev4h > 0) {
+            setIntraday4hPct(Number((((last - prev4h) / prev4h) * 100).toFixed(2)));
           }
         }
-        return a;
+      })
+      .catch(() => {
+        // Fallback intradía automático
       });
-
-      if (changed) {
-        localStorage.setItem('inversor_colombia_alerts', JSON.stringify(next));
-      }
-      return changed ? next : prevAlerts;
-    });
-  }, [stock.price, stock.ticker]);
+    return () => {
+      isMounted = false;
+    };
+  }, [stock.ticker]);
 
   // Crear Alerta
   const handleSaveAlert = () => {
@@ -633,10 +1033,20 @@ export const StockDetail: React.FC<StockDetailProps> = ({
     return allQuarterlyData.slice(-count);
   }, [allQuarterlyData, timeframe]);
 
+  const variabilitySeries = useMemo(
+    () => computePriceVariabilitySeries(stock, rawPoints, intraday4hPct),
+    [stock, rawPoints, intraday4hPct]
+  );
+
+  const divergenceAnalysis = useMemo(
+    () => computePriceRsiDivergence(rawPoints),
+    [rawPoints]
+  );
+
   return (
     <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '24px' }} className="animate-fade-in">
       
-      {/* Toast Notificación de Alerta de Cruce */}
+      {/* Toast Notificación de Alerta de Cruce + Envío de Correo */}
       {triggeredToast && (
         <div style={{
           position: 'fixed',
@@ -649,7 +1059,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
           borderRadius: '12px',
           padding: '16px 20px',
           boxShadow: '0 20px 40px rgba(0,0,0,0.7)',
-          maxWidth: '400px',
+          maxWidth: '420px',
           display: 'flex',
           alignItems: 'flex-start',
           gap: '12px',
@@ -666,6 +1076,33 @@ export const StockDetail: React.FC<StockDetailProps> = ({
             {triggeredToast.note && (
               <div style={{ fontSize: '0.78rem', color: '#f59e0b', marginTop: '6px' }}>
                 Nota: {triggeredToast.note}
+              </div>
+            )}
+            {triggeredToast.emailStatus && (
+              <div style={{ fontSize: '0.74rem', color: '#34d399', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                <Mail size={13} />
+                <span>{triggeredToast.emailStatus}</span>
+                {triggeredToast.emailResult && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLastAlertEmailPreview(triggeredToast.emailResult!);
+                      setShowEmailPreviewModal(true);
+                    }}
+                    style={{
+                      background: 'rgba(16, 185, 129, 0.16)',
+                      border: '1px solid rgba(16, 185, 129, 0.4)',
+                      borderRadius: '5px',
+                      color: '#34d399',
+                      padding: '2px 7px',
+                      fontSize: '0.7rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Ver Correo
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1121,9 +1558,17 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                         ? 'Ingresos Trimestrales & Crecimiento (YoY / QoQ)'
                         : activeChart === 'eps'
                         ? 'Beneficio por Acción (BPA / EPS) & Crecimiento'
+                        : activeChart === 'volume'
+                        ? 'Volumen Bursátil Negociado ($M USD)'
+                        : activeChart === 'profit_m'
+                        ? 'Margen Neto Trimestral (%) & Consenso'
+                        : activeChart === 'fcf'
+                        ? 'Flujo de Caja Libre Trimestral (FCF USD)'
+                        : activeChart === 'rsi'
+                        ? 'Oscilador Técnico RSI (14 Sesiones)'
                         : 'Evolución Histórica & Series Temporales'}
                     </h2>
-                    {activeChart !== 'sales' && activeChart !== 'eps' && timeframeReturn !== null && (
+                    {(activeChart === 'price' || activeChart === 'rsi' || activeChart === 'volume') && timeframeReturn !== null && (
                       <span style={{
                         display: 'inline-flex',
                         alignItems: 'center',
@@ -1155,6 +1600,22 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                         📊 Columnas + Eje Secundario %
                       </span>
                     )}
+                    {(activeChart === 'volume' || activeChart === 'profit_m' || activeChart === 'fcf') && (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        fontSize: '0.74rem',
+                        fontWeight: 700,
+                        background: 'rgba(16, 185, 129, 0.15)',
+                        color: 'var(--accent-green)',
+                        border: '1px solid rgba(16, 185, 129, 0.3)'
+                      }}>
+                        {activeChart === 'volume' ? '📊 Columnas Diarias ($M USD)' : '📊 Columnas Trimestrales (SEC + Previsión)'}
+                      </span>
+                    )}
                     {activeChart === 'eps' && Math.abs(stock.eps_qq ?? 0) > 200 && (
                       <span style={{
                         display: 'inline-flex',
@@ -1177,6 +1638,12 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                       ? 'Columnas de ingresos en USD con % de crecimiento anual (YoY vs mismo periodo año anterior) y secuencial (QoQ vs periodo anterior) en eje secundario'
                       : activeChart === 'eps'
                       ? 'Columnas de BPA en USD con % de crecimiento anual (YoY vs mismo periodo año anterior) y secuencial (QoQ vs periodo anterior) en eje secundario'
+                      : activeChart === 'volume'
+                      ? 'Columnas verticales diarias de volumen negociado en Millones de Dólares ($M USD)'
+                      : activeChart === 'profit_m'
+                      ? 'Columnas verticales trimestrales de Margen de Utilidad Neta (%) — Histórico Informado vs Previsión'
+                      : activeChart === 'fcf'
+                      ? 'Columnas verticales trimestrales de Flujo de Caja Libre (FCF en USD) — Histórico Informado vs Previsión'
                       : loadingHistory
                       ? 'Cargando serie temporal...'
                       : `${chartData.length} sesiones bursátiles analizadas • Histórico disponible hasta 3 años`}
@@ -1185,8 +1652,8 @@ export const StockDetail: React.FC<StockDetailProps> = ({
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                   
-                  {/* Selector: Línea vs Velas Japonesas (solo aplica a precio/mercado) */}
-                  {activeChart !== 'sales' && activeChart !== 'eps' && (
+                  {/* Selector: Línea vs Velas Japonesas (solo aplica a Precio) */}
+                  {activeChart === 'price' && (
                     <div style={{ display: 'flex', gap: '3px', background: 'var(--bg-surface)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
                       <button
                         className={`btn ${chartType === 'area' ? 'btn-active' : 'btn-secondary'}`}
@@ -1345,13 +1812,14 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                         orientation="left" 
                         stroke="var(--text-muted)" 
                         fontSize={10} 
-                        width={58} 
+                        width={62} 
                         tickLine={false} 
+                        domain={activeChart === 'sales' ? [0, 'auto'] : [(dataMin: number) => Math.min(0, dataMin), (dataMax: number) => Math.max(0, dataMax)]}
                         tickFormatter={(val) => {
                           if (activeChart === 'sales') {
                             return formatTickB(val);
                           }
-                          return `$ ${val.toFixed(2).replace('.', ',')}`;
+                          return `$ ${Number(val).toFixed(2).replace('.', ',')}`;
                         }}
                       />
                       {/* Eje Y Secundario Derecho: Tasas de Crecimiento YoY y QoQ (%) */}
@@ -1411,58 +1879,54 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                         wrapperStyle={{ paddingBottom: '10px', fontSize: '0.74rem' }} 
                       />
                       <ReferenceLine 
+                        yAxisId="left" 
+                        y={0} 
+                        stroke="rgba(255,255,255,0.14)" 
+                      />
+                      <ReferenceLine 
                         yAxisId="right" 
                         y={0} 
                         stroke="rgba(255,255,255,0.2)" 
                         strokeDasharray="3 3" 
                       />
 
-                      {/* 1. Barras (Columnas) en el Eje Principal Izquierdo: Separación entre Informado y Previsión */}
-                      {activeChart === 'sales' ? (
-                        <>
-                          <Bar 
-                            yAxisId="left" 
-                            dataKey="sales_informado" 
-                            name="Ingresos Informados (Auditoría SEC)" 
-                            fill="url(#barGradientSales)" 
-                            radius={[4, 4, 0, 0]} 
-                            maxBarSize={36} 
-                          />
-                          <Bar 
-                            yAxisId="left" 
-                            dataKey="sales_prevision" 
-                            name="Ingresos Previsión (Consenso)" 
-                            fill="url(#barGradientSalesPrev)" 
-                            stroke="#f59e0b"
-                            strokeWidth={1.5}
-                            strokeDasharray="3 3"
-                            radius={[4, 4, 0, 0]} 
-                            maxBarSize={36} 
-                          />
-                        </>
-                      ) : (
-                        <>
-                          <Bar 
-                            yAxisId="left" 
-                            dataKey="eps_informado" 
-                            name="BPA Informado (Oficial Auditado)" 
-                            fill="url(#barGradientEps)" 
-                            radius={[4, 4, 0, 0]} 
-                            maxBarSize={36} 
-                          />
-                          <Bar 
-                            yAxisId="left" 
-                            dataKey="eps_prevision" 
-                            name="BPA Previsión (Consenso Wall St)" 
-                            fill="url(#barGradientEpsPrev)" 
-                            stroke="#38bdf8"
-                            strokeWidth={1.5}
-                            strokeDasharray="3 3"
-                            radius={[4, 4, 0, 0]} 
-                            maxBarSize={36} 
-                          />
-                        </>
-                      )}
+                      {/* 1. Barras (Columnas) en el Eje Principal Izquierdo (hija directa de ComposedChart para renderizado garantizado) */}
+                      <Bar 
+                        yAxisId="left" 
+                        dataKey={activeChart === 'sales' ? 'sales' : 'eps'} 
+                        name={activeChart === 'sales' ? 'Ingresos ($ USD)' : 'BPA / EPS ($ USD)'} 
+                        radius={[4, 4, 0, 0]} 
+                        maxBarSize={42} 
+                      >
+                        {quarterlyData.map((entry, idx) => {
+                          const isForecast = entry.status === 'PREVISION';
+                          const rawVal = activeChart === 'sales' ? entry.sales : entry.eps;
+                          const isNeg = rawVal < 0;
+                          const fill = isForecast
+                            ? activeChart === 'sales'
+                              ? 'url(#barGradientSalesPrev)'
+                              : 'url(#barGradientEpsPrev)'
+                            : isNeg
+                            ? '#ef4444'
+                            : activeChart === 'sales'
+                            ? 'url(#barGradientSales)'
+                            : 'url(#barGradientEps)';
+                          const stroke = isForecast
+                            ? activeChart === 'sales'
+                              ? '#f59e0b'
+                              : '#38bdf8'
+                            : 'none';
+                          return (
+                            <Cell
+                              key={`composed-bar-${idx}`}
+                              fill={fill}
+                              stroke={stroke}
+                              strokeWidth={isForecast ? 1.5 : 0}
+                              strokeDasharray={isForecast ? '3 3' : undefined}
+                            />
+                          );
+                        })}
+                      </Bar>
 
                       {/* 2. Línea 1 en Eje Secundario: % Crecimiento vs Año Anterior en el Mismo Periodo (YoY) */}
                       {/* Se traza acotado con sales_yoy_plot / eps_yoy_plot para mantener la escala del eje, mientras el tooltip y tarjetas muestran el % real */}
@@ -1492,8 +1956,147 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
+              ) : activeChart === 'volume' ? (
+                /* Gráfico de Columnas (Barras Verticales) para Volumen $M USD */
+                <div style={{ width: '100%', height: '340px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} margin={{ top: 10, right: 12, left: 4, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="barVolumeCol" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.95} />
+                          <stop offset="100%" stopColor="#b45309" stopOpacity={0.55} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                      <XAxis dataKey="displayDate" stroke="var(--text-muted)" fontSize={11} tickLine={false} />
+                      <YAxis
+                        stroke="var(--text-muted)"
+                        fontSize={11}
+                        width={70}
+                        tickLine={false}
+                        domain={[0, 'auto']}
+                        tickFormatter={(val) => {
+                          const num = Number(val);
+                          if (Math.abs(num) >= 1e3) return `$${(num / 1e3).toFixed(1)}B`;
+                          return `$${num.toFixed(0)}M`;
+                        }}
+                      />
+                      <Tooltip
+                        contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', color: '#fff', fontSize: '0.8rem' }}
+                        labelFormatter={(_label, payload) => {
+                          const p = payload?.[0]?.payload;
+                          if (!p) return _label;
+                          if (p.reportLabel) return `${p.date} • 📅 ${p.reportLabel}`;
+                          return p.date || _label;
+                        }}
+                        formatter={(value: any) => {
+                          const num = Number(value);
+                          if (isNaN(num)) return [value, 'Volumen ($M USD)'];
+                          if (num >= 1e3) {
+                            return [`$${(num / 1e3).toFixed(2)}B USD ($${num.toFixed(0)}M)`, 'Volumen Negociado ($M USD)'];
+                          }
+                          return [`$${num.toFixed(2)}M USD`, 'Volumen Negociado ($M USD)'];
+                        }}
+                      />
+                      <Bar
+                        dataKey="dollarVolume"
+                        name="Volumen Negociado ($M USD)"
+                        fill="url(#barVolumeCol)"
+                        radius={[3, 3, 0, 0]}
+                        maxBarSize={22}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (activeChart === 'profit_m' || activeChart === 'fcf') ? (
+                /* Gráfico de Columnas (Barras Verticales) Trimestrales para Margen Neto % y FCF $ */
+                <div style={{ width: '100%', height: '365px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', padding: '0 6px', fontSize: '0.74rem', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: activeChart === 'profit_m' ? '#c084fc' : '#10b981', fontWeight: 600 }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: activeChart === 'profit_m' ? '#a855f7' : '#10b981' }} />
+                        {activeChart === 'profit_m' ? 'Margen Neto Informado (%)' : 'FCF Informado (SEC USD)'}
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#f59e0b', fontWeight: 600 }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b', border: '1px dashed #fff' }} />
+                        Previsión (Consenso)
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#ef4444', fontWeight: 600 }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
+                        Negativo
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.70rem' }}>
+                      {activeChart === 'fcf' && officialFinancials?.secAnnualFCF != null ? 'Respaldo SEC XBRL + Consenso' : 'Serie Trimestral'}
+                    </div>
+                  </div>
+                  <ResponsiveContainer width="100%" height="88%">
+                    <BarChart data={quarterlyData} margin={{ top: 12, right: 12, left: 4, bottom: 16 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                      <XAxis dataKey="quarterLabel" stroke="var(--text-muted)" fontSize={11} tickLine={false} />
+                      <YAxis
+                        stroke="var(--text-muted)"
+                        fontSize={11}
+                        width={activeChart === 'fcf' ? 72 : 56}
+                        tickLine={false}
+                        domain={[(dataMin: number) => Math.min(0, dataMin), (dataMax: number) => Math.max(0, dataMax)]}
+                        tickFormatter={(val) => {
+                          const num = Number(val);
+                          if (activeChart === 'profit_m') return `${num > 0 ? '+' : ''}${num.toFixed(1)}%`;
+                          return formatTickB(num);
+                        }}
+                      />
+                      <ReferenceLine y={0} stroke="rgba(255,255,255,0.22)" strokeDasharray="3 3" />
+                      <Tooltip
+                        contentStyle={{ background: 'rgba(15, 23, 42, 0.96)', border: '1px solid #1e293b', borderRadius: '10px', color: '#fff', fontSize: '0.8rem' }}
+                        labelFormatter={(_label, payload) => {
+                          const p = payload?.[0]?.payload;
+                          if (!p) return _label;
+                          const tag = p.status === 'PREVISION' ? '⏳ PREVISIÓN (Sin reportar)' : '✅ INFORMADO (Auditado)';
+                          return `${tag} • ${p.period} (${p.date})`;
+                        }}
+                        formatter={(value: any, _name: any, item: any) => {
+                          const num = Number(value);
+                          if (isNaN(num)) return [value, _name];
+                          if (activeChart === 'profit_m') {
+                            return [`${num >= 0 ? '+' : ''}${num.toFixed(2)}%`, 'Margen Neto (%)'];
+                          }
+                          const isAudited = Boolean(item?.payload?.isFcfAudited);
+                          return [formatCurrencyB(num), `Flujo de Caja Libre (FCF)${isAudited ? ' • SEC Auditado' : ''}`];
+                        }}
+                      />
+                      <Bar
+                        dataKey={activeChart}
+                        name={activeChart === 'profit_m' ? 'Margen Neto (%)' : 'Flujo de Caja Libre (FCF $)'}
+                        radius={[4, 4, 0, 0]}
+                        maxBarSize={42}
+                      >
+                        {quarterlyData.map((entry, idx) => {
+                          const val = activeChart === 'profit_m' ? entry.profit_m : entry.fcf;
+                          const isForecast = entry.status === 'PREVISION';
+                          const fill = isForecast
+                            ? '#f59e0b'
+                            : val < 0
+                            ? '#ef4444'
+                            : activeChart === 'profit_m'
+                            ? '#a855f7'
+                            : '#10b981';
+                          return (
+                            <Cell
+                              key={`qcol-${activeChart}-${idx}`}
+                              fill={fill}
+                              fillOpacity={isForecast ? 0.78 : 0.92}
+                              stroke={isForecast ? '#fbbf24' : 'none'}
+                              strokeWidth={isForecast ? 1.2 : 0}
+                            />
+                          );
+                        })}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               ) : (
-                /* Gráfico de Área Continua para Precio, RSI, Volumen, Margen y FCF */
+                /* Gráfico de Área Continua para Precio y RSI */
                 <div style={{ width: '100%', height: '340px' }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -1506,43 +2109,17 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                           <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.4}/>
                           <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.0}/>
                         </linearGradient>
-                        <linearGradient id="chartGradientAmber" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.4}/>
-                          <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0}/>
-                        </linearGradient>
-                        <linearGradient id="chartGradientPurple" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#a855f7" stopOpacity={0.4}/>
-                          <stop offset="95%" stopColor="#a855f7" stopOpacity={0.0}/>
-                        </linearGradient>
-                        <linearGradient id="chartGradientBlue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4}/>
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0}/>
-                        </linearGradient>
-                        <linearGradient id="chartGradientIndigo" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4}/>
-                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0}/>
-                        </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                       <XAxis dataKey="displayDate" stroke="var(--text-muted)" fontSize={11} />
                       <YAxis 
                         stroke="var(--text-muted)" 
                         fontSize={11} 
-                        width={activeChart === 'volume' || activeChart === 'fcf' ? 70 : 55}
+                        width={55}
                         domain={activeChart === 'rsi' ? [0, 100] : ['auto', 'auto']} 
                         tickFormatter={(val) => {
-                          if (activeChart === 'volume') {
-                            if (Math.abs(val) >= 1e3) return `$${(val / 1e3).toFixed(1)}B`;
-                            return `$${val.toFixed(0)}M`;
-                          }
-                          if (activeChart === 'fcf') {
-                            return formatTickB(val);
-                          }
                           if (activeChart === 'price') {
                             return `$${val}`;
-                          }
-                          if (activeChart === 'profit_m') {
-                            return `${val > 0 ? '+' : ''}${val}%`;
                           }
                           return `${val}`;
                         }}
@@ -1560,24 +2137,11 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                         formatter={(value: any, name: any) => {
                           const num = Number(value);
                           if (isNaN(num)) return [value, name];
-                          if (activeChart === 'volume') {
-                            if (num >= 1e3) {
-                              return [`$${(num / 1e3).toFixed(2)}B USD ($${num.toFixed(0)}M)`, 'Volumen Negociado ($M USD)'];
-                            }
-                            return [`$${num.toFixed(2)}M USD`, 'Volumen Negociado ($M USD)'];
-                          }
                           if (activeChart === 'price') {
                             return [`$${num.toFixed(2)} USD`, 'Precio'];
                           }
                           if (activeChart === 'rsi') {
                             return [`${num.toFixed(2)} pts`, 'RSI (14)'];
-                          }
-                          if (activeChart === 'profit_m') {
-                            return [`${num.toFixed(2)}%`, 'Margen Neto'];
-                          }
-                          if (activeChart === 'fcf') {
-                            const isAudited = officialFinancials?.secAnnualFCF !== undefined && officialFinancials?.secAnnualFCF !== null;
-                            return [formatCurrencyB(num), `Flujo de Caja Libre (FCF)${isAudited ? ' • SEC XBRL Auditado' : ''}`];
                           }
                           return [num.toLocaleString('es-CO'), name];
                         }}
@@ -1608,15 +2172,6 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                       {activeChart === 'rsi' && (
                         <Area type="monotone" dataKey="rsi" stroke="#06b6d4" strokeWidth={2} fillOpacity={1} fill="url(#chartGradientCyan)" name="RSI (14)" />
                       )}
-                      {activeChart === 'volume' && (
-                        <Area type="monotone" dataKey="dollarVolume" stroke="#f59e0b" strokeWidth={2} fillOpacity={1} fill="url(#chartGradientAmber)" name="Volumen ($M USD)" />
-                      )}
-                      {activeChart === 'profit_m' && (
-                        <Area type="monotone" dataKey="profit_m" stroke="#a855f7" strokeWidth={2} fillOpacity={1} fill="url(#chartGradientPurple)" name="Margen Neto (%)" />
-                      )}
-                      {activeChart === 'fcf' && (
-                        <Area type="monotone" dataKey="fcf" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#chartGradientGreen)" name="FCF ($ USD)" />
-                      )}
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -1625,6 +2180,266 @@ export const StockDetail: React.FC<StockDetailProps> = ({
           )}
 
         </div>
+
+      {/* Apartado de Análisis Técnico: Variabilidad de Precio (4H, 1D, 3D, 1S, 1M) & Divergencia Precio vs RSI */}
+      <div className="glass-panel" style={{ padding: '26px', marginBottom: '28px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <BarChart2 size={22} color="var(--accent-cyan)" />
+            <div>
+              <h2 style={{ fontSize: '1.22rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+                Análisis Técnico: Variabilidad de Precio &amp; Divergencia RSI (14)
+              </h2>
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                Serie temporal de variaciones porcentuales (4H, 1D, 3D, 1S, 1M) y lectura de máximos/mínimos Precio vs. Oscilador RSI
+              </span>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {stock.rsi !== undefined && stock.rsi !== null && (
+              <span style={{
+                padding: '4px 10px',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                background: stock.rsi >= 70 ? 'rgba(239, 68, 68, 0.14)' : stock.rsi <= 30 ? 'rgba(16, 185, 129, 0.14)' : 'rgba(6, 182, 212, 0.12)',
+                color: stock.rsi >= 70 ? '#ef4444' : stock.rsi <= 30 ? '#10b981' : '#38bdf8',
+                border: '1px solid rgba(255,255,255,0.08)'
+              }}>
+                RSI (14) Actual: {stock.rsi.toFixed(1)} pts
+              </span>
+            )}
+            <span style={{
+              padding: '4px 10px',
+              borderRadius: '8px',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              background: 'rgba(15, 23, 42, 0.75)',
+              color: divergenceAnalysis.directionColor,
+              border: `1px solid ${divergenceAnalysis.directionColor}`
+            }}>
+              {divergenceAnalysis.classification} • Grado {divergenceAnalysis.degreePct}%
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
+          {/* Sub-panel 1: Gráfico de Columnas de Variabilidad del Precio */}
+          <div style={{
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '12px',
+            padding: '18px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <strong style={{ fontSize: '0.94rem', color: '#fff' }}>
+                Variabilidad del Precio (% Cambio por Horizonte)
+              </strong>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                4H • 1D • 3D • 1S • 1M
+              </span>
+            </div>
+
+            <div style={{ width: '100%', height: '235px' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={variabilitySeries} margin={{ top: 14, right: 12, left: -6, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                  <XAxis dataKey="shortLabel" stroke="var(--text-muted)" fontSize={11} tickLine={false} />
+                  <YAxis
+                    stroke="var(--text-muted)"
+                    fontSize={11}
+                    width={52}
+                    tickLine={false}
+                    domain={[(dataMin: number) => Math.min(-1, dataMin * 1.15), (dataMax: number) => Math.max(1, dataMax * 1.15)]}
+                    tickFormatter={(v) => `${Number(v) > 0 ? '+' : ''}${Number(v).toFixed(1)}%`}
+                  />
+                  <ReferenceLine y={0} stroke="rgba(255,255,255,0.28)" />
+                  <Tooltip
+                    contentStyle={{ background: 'rgba(15, 23, 42, 0.96)', border: '1px solid #1e293b', borderRadius: '10px', color: '#fff', fontSize: '0.8rem' }}
+                    labelFormatter={(_label, payload) => {
+                      const p = payload?.[0]?.payload as VariabilityPoint | undefined;
+                      return p ? `${p.horizon} (${p.sourceNote})` : String(_label);
+                    }}
+                    formatter={(value: any, _name: any, item: any) => {
+                      const pct = Number(value);
+                      const p = item?.payload as VariabilityPoint | undefined;
+                      const usdStr = p ? ` (${p.changeUsd >= 0 ? '+$' : '-$'}${Math.abs(p.changeUsd).toFixed(2)} USD)` : '';
+                      return [`${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%${usdStr}`, 'Variación del Precio'];
+                    }}
+                  />
+                  <Bar dataKey="changePct" name="% Variación" radius={[5, 5, 0, 0]} maxBarSize={46}>
+                    {variabilitySeries.map((pt, idx) => (
+                      <Cell
+                        key={`var-col-${idx}`}
+                        fill={pt.changePct >= 0 ? '#10b981' : '#ef4444'}
+                        fillOpacity={0.9}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '8px', marginTop: '12px' }}>
+              {variabilitySeries.map(pt => (
+                <div
+                  key={pt.shortLabel}
+                  style={{
+                    background: 'rgba(255,255,255,0.025)',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    borderRadius: '8px',
+                    padding: '8px 6px',
+                    textAlign: 'center'
+                  }}
+                  title={`${pt.horizon}: ${pt.sourceNote}`}
+                >
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>{pt.horizon}</div>
+                  <div
+                    className="font-mono"
+                    style={{
+                      fontSize: '0.88rem',
+                      fontWeight: 800,
+                      marginTop: '3px',
+                      color: pt.changePct >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'
+                    }}
+                  >
+                    {pt.changePct >= 0 ? '+' : ''}{pt.changePct.toFixed(2)}%
+                  </div>
+                  <div className="font-mono" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    {pt.changeUsd >= 0 ? '+$' : '-$'}{Math.abs(pt.changeUsd).toFixed(2)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Sub-panel 2: Grado de Divergencia Precio (Máximos/Mínimos) vs RSI */}
+          <div style={{
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '12px',
+            padding: '18px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            gap: '14px'
+          }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <GitCompare size={18} color={divergenceAnalysis.directionColor} />
+                  <strong style={{ fontSize: '0.94rem', color: '#fff' }}>
+                    Divergencia Precio vs. RSI ({divergenceAnalysis.windowSessions} sesiones)
+                  </strong>
+                </div>
+                <span style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  background: 'rgba(255,255,255,0.05)',
+                  color: divergenceAnalysis.directionColor
+                }}>
+                  Severidad: {divergenceAnalysis.severity}
+                </span>
+              </div>
+
+              {/* Indicador Cuantitativo de Grado de Divergencia (0% - 100%) */}
+              <div style={{
+                background: 'rgba(2, 6, 23, 0.45)',
+                border: '1px solid rgba(255,255,255,0.07)',
+                borderRadius: '10px',
+                padding: '12px 14px',
+                marginBottom: '14px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                    Grado de Divergencia Detectado:
+                  </span>
+                  <span className="font-mono" style={{ fontSize: '1.35rem', fontWeight: 900, color: divergenceAnalysis.directionColor }}>
+                    {divergenceAnalysis.degreePct}%
+                  </span>
+                </div>
+                <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.08)', borderRadius: '999px', overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${Math.min(100, Math.max(4, divergenceAnalysis.degreePct))}%`,
+                    height: '100%',
+                    background: divergenceAnalysis.directionColor,
+                    borderRadius: '999px',
+                    transition: 'width 0.4s ease'
+                  }} />
+                </div>
+                <div style={{ fontSize: '0.76rem', color: divergenceAnalysis.directionColor, fontWeight: 700, marginTop: '6px' }}>
+                  {divergenceAnalysis.classification}
+                </div>
+              </div>
+
+              {/* Comparativa de Máximos y Mínimos: Precio vs RSI */}
+              {divergenceAnalysis.hasEnoughData ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  {/* Máximos */}
+                  <div style={{
+                    background: divergenceAnalysis.highs.isDivergent ? 'rgba(239, 68, 68, 0.08)' : 'rgba(255,255,255,0.025)',
+                    border: divergenceAnalysis.highs.isDivergent ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid rgba(255,255,255,0.07)',
+                    borderRadius: '8px',
+                    padding: '10px 12px',
+                    fontSize: '0.76rem'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <strong style={{ color: '#fff' }}>Máximos (Highs)</strong>
+                      <span style={{ color: divergenceAnalysis.highs.isDivergent ? '#ef4444' : 'var(--accent-green)', fontWeight: 700, fontSize: '0.7rem' }}>
+                        {divergenceAnalysis.highs.isDivergent ? 'Divergente' : 'Confirmado'}
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                      <div>Precio: <strong className="font-mono" style={{ color: '#fff' }}>${divergenceAnalysis.highs.prevPrice.toFixed(2)}</strong> → <strong className="font-mono" style={{ color: '#fff' }}>${divergenceAnalysis.highs.recentPrice.toFixed(2)}</strong> ({divergenceAnalysis.highs.priceDeltaPct >= 0 ? '+' : ''}{divergenceAnalysis.highs.priceDeltaPct.toFixed(1)}%)</div>
+                      <div>RSI: <strong className="font-mono" style={{ color: '#38bdf8' }}>{divergenceAnalysis.highs.prevRsi.toFixed(1)}</strong> → <strong className="font-mono" style={{ color: '#38bdf8' }}>{divergenceAnalysis.highs.recentRsi.toFixed(1)}</strong> ({divergenceAnalysis.highs.rsiDeltaPts >= 0 ? '+' : ''}{divergenceAnalysis.highs.rsiDeltaPts.toFixed(1)} pts)</div>
+                    </div>
+                  </div>
+
+                  {/* Mínimos */}
+                  <div style={{
+                    background: divergenceAnalysis.lows.isDivergent ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255,255,255,0.025)',
+                    border: divergenceAnalysis.lows.isDivergent ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid rgba(255,255,255,0.07)',
+                    borderRadius: '8px',
+                    padding: '10px 12px',
+                    fontSize: '0.76rem'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <strong style={{ color: '#fff' }}>Mínimos (Lows)</strong>
+                      <span style={{ color: divergenceAnalysis.lows.isDivergent ? '#10b981' : 'var(--text-secondary)', fontWeight: 700, fontSize: '0.7rem' }}>
+                        {divergenceAnalysis.lows.isDivergent ? 'Divergente' : 'Confirmado'}
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                      <div>Precio: <strong className="font-mono" style={{ color: '#fff' }}>${divergenceAnalysis.lows.prevPrice.toFixed(2)}</strong> → <strong className="font-mono" style={{ color: '#fff' }}>${divergenceAnalysis.lows.recentPrice.toFixed(2)}</strong> ({divergenceAnalysis.lows.priceDeltaPct >= 0 ? '+' : ''}{divergenceAnalysis.lows.priceDeltaPct.toFixed(1)}%)</div>
+                      <div>RSI: <strong className="font-mono" style={{ color: '#38bdf8' }}>{divergenceAnalysis.lows.prevRsi.toFixed(1)}</strong> → <strong className="font-mono" style={{ color: '#38bdf8' }}>{divergenceAnalysis.lows.recentRsi.toFixed(1)}</strong> ({divergenceAnalysis.lows.rsiDeltaPts >= 0 ? '+' : ''}{divergenceAnalysis.lows.rsiDeltaPts.toFixed(1)} pts)</div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  Cargando suficientes sesiones históricas (mínimo 24 sesiones) para comparar máximos y mínimos frente al RSI (14).
+                </div>
+              )}
+            </div>
+
+            {/* Diagnóstico técnico */}
+            <div style={{
+              background: 'rgba(6, 182, 212, 0.06)',
+              borderLeft: `3px solid ${divergenceAnalysis.directionColor}`,
+              borderRadius: '6px',
+              padding: '10px 12px',
+              fontSize: '0.79rem',
+              color: 'var(--text-secondary)',
+              lineHeight: 1.5
+            }}>
+              {divergenceAnalysis.diagnosis}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* 2. Factor Grades Scorecard Cuantitativo (Ubicado debajo del Terminal Gráfico) */}
       <div className="glass-panel" style={{ padding: '26px', marginBottom: '28px' }}>
@@ -1747,8 +2562,29 @@ export const StockDetail: React.FC<StockDetailProps> = ({
               </button>
             </div>
 
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.5 }}>
-              Define un nivel de precio objetivo para <strong>{stock.ticker}</strong>. El aplicativo emitirá una alerta sonora y visual en el momento exacto en que la cotización cruce la línea trazada.
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '14px', lineHeight: 1.5 }}>
+              Define un nivel de precio objetivo para <strong>{stock.ticker}</strong>. Cuando la cotización cruce la línea trazada, recibirás una alerta sonora y visual en plataforma y se enviará una notificación institucional a tu correo registrado con la presentación de <strong>Inversor Colombia</strong>.
+            </div>
+
+            {/* Correo de destino registrado */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '8px',
+              padding: '8px 12px',
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.28)',
+              borderRadius: '8px',
+              marginBottom: '14px',
+              fontSize: '0.78rem'
+            }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#34d399', fontWeight: 600 }}>
+                <Mail size={14} /> Correo destino:
+              </span>
+              <strong style={{ color: '#fff', wordBreak: 'break-all' }}>
+                {user?.email || 'Sesión sin correo verificado'}
+              </strong>
             </div>
 
             {/* Precio actual */}
@@ -1869,17 +2705,30 @@ export const StockDetail: React.FC<StockDetailProps> = ({
             </div>
 
             {/* Botones de acción */}
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginBottom: '20px' }}>
-              <button className="btn btn-secondary" onClick={() => setShowAlertModal(false)}>
-                Cancelar
-              </button>
-              <button 
-                className="btn btn-primary" 
-                style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', border: 'none' }}
-                onClick={handleSaveAlert}
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={sendingTestEmail}
+                onClick={handlePreviewOrTestAlertEmail}
+                style={{ fontSize: '0.78rem', gap: '6px', borderColor: 'rgba(6, 182, 212, 0.35)', color: '#38bdf8' }}
+                title="Visualiza el formato HTML institucional con logo de Inversor Colombia y prueba el envío al correo registrado"
               >
-                <Bell size={15} /> Guardar Alerta
+                <Mail size={14} /> {sendingTestEmail ? 'Enviando...' : '📩 Ver/Probar Correo'}
               </button>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button className="btn btn-secondary" onClick={() => setShowAlertModal(false)}>
+                  Cancelar
+                </button>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', border: 'none' }}
+                  onClick={handleSaveAlert}
+                >
+                  <Bell size={15} /> Guardar Alerta
+                </button>
+              </div>
             </div>
 
             {/* Lista de alertas existentes para este activo */}
@@ -2119,6 +2968,91 @@ export const StockDetail: React.FC<StockDetailProps> = ({
         stock={stock}
         onSuccess={() => onToggleWatchlist(stock.ticker)}
       />
+
+      {/* Modal: Vista Previa / Confirmación del Correo de Alerta Institucional */}
+      {showEmailPreviewModal && lastAlertEmailPreview && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.8)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1100,
+          padding: '20px'
+        }}>
+          <div className="glass-panel" style={{
+            maxWidth: '680px',
+            width: '100%',
+            padding: '22px',
+            borderRadius: '16px',
+            background: '#0b1120',
+            border: '1px solid var(--border-medium)',
+            boxShadow: 'var(--shadow-lg)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <Mail size={20} color="#38bdf8" />
+                <h3 style={{ fontSize: '1.08rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+                  Notificación por Correo — Inversor Colombia
+                </h3>
+                <span style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: '999px',
+                  background: lastAlertEmailPreview.delivered ? 'rgba(16, 185, 129, 0.16)' : 'rgba(245, 158, 11, 0.16)',
+                  color: lastAlertEmailPreview.delivered ? '#34d399' : '#fbbf24',
+                  border: lastAlertEmailPreview.delivered ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(245, 158, 11, 0.4)'
+                }}>
+                  {lastAlertEmailPreview.delivered ? `Enviado (${lastAlertEmailPreview.provider})` : 'Vista Previa de Plantilla'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEmailPreviewModal(false)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                title="Cerrar vista previa"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '12px', display: 'flex', flexDirection: 'column', gap: '4px', background: 'rgba(255,255,255,0.03)', padding: '10px 12px', borderRadius: '8px' }}>
+              <div><strong style={{ color: '#fff' }}>Para:</strong> {lastAlertEmailPreview.recipient}</div>
+              <div><strong style={{ color: '#fff' }}>Asunto:</strong> {lastAlertEmailPreview.subject}</div>
+              {!lastAlertEmailPreview.delivered && lastAlertEmailPreview.message && (
+                <div style={{ color: '#fbbf24', fontSize: '0.74rem' }}>
+                  Nota de despacho: {lastAlertEmailPreview.message}
+                </div>
+              )}
+            </div>
+
+            <iframe
+              title="Vista previa del correo de alerta de Inversor Colombia"
+              srcDoc={lastAlertEmailPreview.htmlBody}
+              sandbox=""
+              style={{
+                width: '100%',
+                height: '480px',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '10px',
+                background: '#070b14'
+              }}
+            />
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '14px' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setShowEmailPreviewModal(false)}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

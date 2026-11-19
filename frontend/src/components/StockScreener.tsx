@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Download, 
-  Eye, 
   TrendingUp, 
   DollarSign, 
   ShieldCheck, 
@@ -24,6 +23,7 @@ import { toast } from 'sonner';
 import type { StockRecord } from '../types/stock';
 import type { ScreenerUIFilterPayload } from '../types/agent';
 import { parseNaturalLanguageToScreenerFilters } from '../services/agentRagService';
+import { getLatestOfficialFinancials } from '../services/quarterlyFinancialsService';
 import { calculateFactorGrades } from '../utils/quantRatings';
 import { formatCurrencyUSD, formatPercentage, formatVolumeShares } from '../utils/formatters';
 import { SCREENER_SESSION_STORAGE_KEY } from '../context/AuthContext';
@@ -40,9 +40,32 @@ interface StockScreenerProps {
   onOpenAgentDrawerWithQuery?: (query: string) => void;
 }
 
-export type SortField = keyof StockRecord | 'quant_rating';
+export type SortField = keyof StockRecord | 'quant_rating' | 'fcf' | 'target_diff';
 type FilterCategory = 'descriptive' | 'fundamental' | 'technical' | 'all';
 type TableView = 'custom' | 'overview' | 'valuation' | 'financial' | 'performance' | 'technical';
+
+export function computeStockFCF(stock: StockRecord): number | null {
+  const official = getLatestOfficialFinancials(stock.ticker);
+  if (official?.secAnnualFCF !== undefined && official?.secAnnualFCF !== null) {
+    return official.secAnnualFCF;
+  }
+  if (stock.income !== undefined && stock.income !== null && stock.income !== 0) {
+    const incAbs = Math.abs(stock.income) > 1e6 ? stock.income : stock.income * 1e6;
+    return Number((incAbs * 0.85).toFixed(2));
+  }
+  if (stock.sales && stock.sales > 0 && stock.profit_m !== undefined && stock.profit_m !== null) {
+    const salesAbs = stock.sales > 1e6 ? stock.sales : stock.sales * 1e6;
+    return Number((salesAbs * (stock.profit_m / 100) * 0.85).toFixed(2));
+  }
+  return null;
+}
+
+export function computeTargetDiff(stock: StockRecord): { diffUsd: number; diffPct: number } | null {
+  if (!stock.target_price || !stock.price || stock.price <= 0) return null;
+  const diffUsd = stock.target_price - stock.price;
+  const diffPct = ((stock.target_price - stock.price) / stock.price) * 100;
+  return { diffUsd, diffPct };
+}
 
 export interface ScreenerViewConfig {
   nlQuery: string;
@@ -160,33 +183,34 @@ interface ColumnDef {
 }
 
 const CUSTOM_COLUMNS: ColumnDef[] = [
-  { field: 'ticker', label: 'Ticker', title: 'Símbolo Bursátil', align: 'left', width: '4.8%' },
-  { field: 'company', label: 'Empresa', title: 'Compañía', align: 'left', width: '7.4%' },
-  { field: 'sector', label: 'Sector', title: 'Sector Económico', align: 'left', width: '5.8%' },
-  { field: 'industry', label: 'Industria', title: 'Industria', align: 'left', width: '6.4%' },
-  { field: 'market_cap', label: 'Cap. M.', title: 'Capitalización de Mercado (USD)', align: 'right', width: '5.2%' },
-  { field: 'price', label: 'Precio', title: 'Precio de Cotización', align: 'right', width: '4.0%' },
-  { field: 'pe', label: 'P/E', title: 'Price to Earnings', align: 'right', width: '3.2%' },
-  { field: 'forward_pe', label: 'Fwd P/E', title: 'Forward P/E', align: 'right', width: '3.5%' },
-  { field: 'ps', label: 'P/S', title: 'Price to Sales', align: 'right', width: '3.0%' },
-  { field: 'rsi', label: 'RSI', title: 'RSI (14D)', align: 'right', width: '3.1%' },
-  { field: 'ev_ebitda', label: 'EV/Eb.', title: 'EV / EBITDA', align: 'right', width: '3.7%' },
-  { field: 'volume', label: 'Vol.', title: 'Volumen de Acciones', align: 'right', width: '4.1%' },
-  { field: 'change_pct', label: 'Var %', title: 'Variación Diaria %', align: 'right', width: '3.8%' },
-  { field: 'eps_past_5y', label: 'EPS 5A', title: 'Crecimiento EPS Pasado 5 Años %', align: 'right', width: '3.6%' },
-  { field: 'profit_m', label: 'Margen N.', title: 'Margen de Beneficio Neto %', align: 'right', width: '3.8%' },
-  { field: 'eps_qq', label: 'EPS Q/Q', title: 'Crecimiento EPS Q/Q %', align: 'right', width: '3.7%' },
-  { field: 'target_price', label: 'Tgt Prc', title: 'Precio Objetivo de Analistas', align: 'right', width: '4.1%' },
-  { field: 'peg', label: 'PEG', title: 'PEG Ratio', align: 'right', width: '3.0%' },
-  { field: 'curr_r', label: 'Curr R', title: 'Current Ratio', align: 'right', width: '3.0%' },
-  { field: 'debt_eq', label: 'Deuda/Eq', title: 'Deuda sobre Patrimonio', align: 'right', width: '3.2%' },
-  { field: 'eps', label: 'EPS', title: 'EPS Diluido', align: 'right', width: '3.1%' },
-  { field: 'eps_past_3y', label: 'EPS 3A', title: 'Crecimiento EPS Pasado 3 Años %', align: 'right', width: '3.5%' },
-  { field: 'roic', label: 'ROIC', title: 'Return on Invested Capital %', align: 'right', width: '3.3%' },
-  { field: 'sma200', label: 'SMA200', title: 'Distancia a Media Móvil 200 Días %', align: 'right', width: '3.7%' },
-  { field: 'sales', label: 'Ventas', title: 'Ventas Totales Anuales (USD)', align: 'right', width: '4.8%' },
-  { field: 'sales_yoy_ttm', label: 'Vts YoY', title: 'Crecimiento Ventas YoY TTM %', align: 'right', width: '3.7%' },
-  { field: 'quant_rating', label: 'Quant', title: 'Quant Factor Grades Rating', align: 'center', width: '5.4%' }
+  { field: 'ticker', label: 'Ticker', title: 'Símbolo Bursátil', align: 'left', width: '4.3%' },
+  { field: 'company', label: 'Empresa', title: 'Compañía', align: 'left', width: '5.9%' },
+  { field: 'sector', label: 'Sector', title: 'Sector Económico', align: 'left', width: '4.6%' },
+  { field: 'industry', label: 'Industria', title: 'Industria', align: 'left', width: '4.9%' },
+  { field: 'market_cap', label: 'Cap. M.', title: 'Capitalización de Mercado (USD)', align: 'right', width: '4.3%' },
+  { field: 'price', label: 'Precio', title: 'Precio de Cotización', align: 'right', width: '3.8%' },
+  { field: 'pe', label: 'P/E', title: 'Price to Earnings', align: 'right', width: '2.9%' },
+  { field: 'forward_pe', label: 'Fwd P/E', title: 'Forward P/E', align: 'right', width: '3.1%' },
+  { field: 'ps', label: 'P/S', title: 'Price to Sales', align: 'right', width: '2.7%' },
+  { field: 'rsi', label: 'RSI', title: 'RSI (14D)', align: 'right', width: '2.8%' },
+  { field: 'ev_ebitda', label: 'EV/Eb.', title: 'EV / EBITDA', align: 'right', width: '3.2%' },
+  { field: 'volume', label: 'Vol.', title: 'Volumen de Acciones', align: 'right', width: '3.7%' },
+  { field: 'change_pct', label: 'Var %', title: 'Variación Diaria %', align: 'right', width: '3.5%' },
+  { field: 'eps_past_5y', label: 'EPS 5A', title: 'Crecimiento EPS Pasado 5 Años %', align: 'right', width: '3.2%' },
+  { field: 'profit_m', label: 'Margen N.', title: 'Margen de Beneficio Neto %', align: 'right', width: '3.4%' },
+  { field: 'eps_qq', label: 'EPS Q/Q', title: 'Crecimiento EPS Q/Q %', align: 'right', width: '3.3%' },
+  { field: 'target_price', label: 'Tgt Prc', title: 'Precio Objetivo de Analistas', align: 'right', width: '3.6%' },
+  { field: 'target_diff', label: 'Dif. Tgt', title: 'Diferencia entre Precio Objetivo (Tgt Prc) y Precio Actual ($ y %)', align: 'right', width: '4.3%' },
+  { field: 'peg', label: 'PEG', title: 'PEG Ratio', align: 'right', width: '2.7%' },
+  { field: 'curr_r', label: 'Curr R', title: 'Current Ratio', align: 'right', width: '2.7%' },
+  { field: 'debt_eq', label: 'Deuda/Eq', title: 'Deuda sobre Patrimonio', align: 'right', width: '2.9%' },
+  { field: 'eps', label: 'EPS', title: 'EPS Diluido', align: 'right', width: '2.8%' },
+  { field: 'fcf', label: 'FCF', title: 'Free Cash Flow — Flujo de Caja Libre Anual (USD)', align: 'right', width: '3.7%' },
+  { field: 'roic', label: 'ROIC', title: 'Return on Invested Capital %', align: 'right', width: '3.0%' },
+  { field: 'sma200', label: 'SMA200', title: 'Distancia a Media Móvil 200 Días %', align: 'right', width: '3.4%' },
+  { field: 'sales', label: 'Ventas', title: 'Ventas Totales Anuales (USD)', align: 'right', width: '3.8%' },
+  { field: 'sales_yoy_ttm', label: 'Vts YoY', title: 'Crecimiento Ventas YoY TTM %', align: 'right', width: '3.2%' },
+  { field: 'quant_rating', label: 'Quant', title: 'Quant Factor Grades Rating', align: 'center', width: '4.3%' }
 ];
 
 const PARTIAL_VIEW_EXTRA_COLUMNS: Record<Exclude<TableView, 'custom'>, ColumnDef[]> = {
@@ -221,13 +245,13 @@ const PARTIAL_VIEW_EXTRA_COLUMNS: Record<Exclude<TableView, 'custom'>, ColumnDef
 
 function getPartialViewColumns(view: Exclude<TableView, 'custom'>): ColumnDef[] {
   return [
-    { field: 'ticker', label: 'Ticker', align: 'left', width: '8%' },
-    { field: 'company', label: 'Empresa', align: 'left', width: '18%' },
+    { field: 'ticker', label: 'Ticker', align: 'left', width: '9%' },
+    { field: 'company', label: 'Empresa', align: 'left', width: '21%' },
     { field: 'price', label: 'Precio', align: 'right', width: '8%' },
     { field: 'change_pct', label: 'Var %', align: 'right', width: '8%' },
     { field: 'market_cap', label: 'Cap. Mercado', align: 'right', width: '12%' },
     ...PARTIAL_VIEW_EXTRA_COLUMNS[view],
-    { field: 'quant_rating', label: 'Quant Rating', align: 'center', width: '12%' },
+    { field: 'quant_rating', label: 'Quant Rating', align: 'center', width: '14%' },
   ];
 }
 
@@ -649,8 +673,21 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
       return true;
     }).sort((a, b) => {
-      let valA: any = sortField === 'quant_rating' ? calculateFactorGrades(a).quantScore : a[sortField as keyof StockRecord];
-      let valB: any = sortField === 'quant_rating' ? calculateFactorGrades(b).quantScore : b[sortField as keyof StockRecord];
+      let valA: any;
+      let valB: any;
+      if (sortField === 'quant_rating') {
+        valA = calculateFactorGrades(a).quantScore;
+        valB = calculateFactorGrades(b).quantScore;
+      } else if (sortField === 'fcf') {
+        valA = computeStockFCF(a);
+        valB = computeStockFCF(b);
+      } else if (sortField === 'target_diff') {
+        valA = computeTargetDiff(a)?.diffPct ?? null;
+        valB = computeTargetDiff(b)?.diffPct ?? null;
+      } else {
+        valA = a[sortField as keyof StockRecord];
+        valB = b[sortField as keyof StockRecord];
+      }
 
       const isNullA = valA === undefined || valA === null || valA === '' || (typeof valA === 'number' && isNaN(valA));
       const isNullB = valB === undefined || valB === null || valB === '' || (typeof valB === 'number' && isNaN(valB));
@@ -681,7 +718,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
     } else {
       const defaultDesc = [
         'market_cap', 'price', 'volume', 'roic', 'profit_m', 'change_pct',
-        'quant_rating', 'sales', 'eps_qq', 'sales_yoy_ttm', 'eps_past_5y', 'eps'
+        'quant_rating', 'sales', 'eps_qq', 'sales_yoy_ttm', 'eps_past_5y', 'eps', 'fcf', 'target_diff'
       ].includes(field);
       updateConfig({ sortField: field, sortAsc: !defaultDesc });
     }
@@ -692,13 +729,15 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
     const headers = [
       'Ticker', 'Company', 'Sector', 'Industry', 'Market Cap (USD)', 'Price',
       'P/E', 'Forward P/E', 'PEG', 'P/S', 'RSI', 'EV/EBITDA', 'Volume', 'Change %',
-      'EPS Past 5Y', 'Profit Margin', 'EPS Q/Q', 'Target Price', 'Current Ratio',
-      'Debt/Equity', 'EPS', 'EPS Past 3Y', 'ROIC', 'SMA200 %', 'Sales (USD)', 'Sales YoY TTM',
+      'EPS Past 5Y', 'Profit Margin', 'EPS Q/Q', 'Target Price', 'Target Diff ($)', 'Target Diff (%)',
+      'Current Ratio', 'Debt/Equity', 'EPS', 'FCF (USD)', 'ROIC', 'SMA200 %', 'Sales (USD)', 'Sales YoY TTM',
       'Quant Score', 'Quant Rating'
     ];
 
     const rows = filteredStocks.map(s => {
       const q = calculateFactorGrades(s);
+      const fcfVal = computeStockFCF(s);
+      const tgtDiff = computeTargetDiff(s);
       return [
         s.ticker,
         `"${s.company || ''}"`,
@@ -718,10 +757,12 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
         s.profit_m || '',
         s.eps_qq || '',
         s.target_price || '',
+        tgtDiff ? tgtDiff.diffUsd.toFixed(2) : '',
+        tgtDiff ? tgtDiff.diffPct.toFixed(2) : '',
         s.curr_r || '',
         s.debt_eq || '',
         s.eps || '',
-        s.eps_past_3y || '',
+        fcfVal !== null ? fcfVal : '',
         s.roic || '',
         s.sma200 || '',
         s.sales || '',
@@ -1498,15 +1539,14 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                   </th>
                 );
               })}
-              <th style={{ width: tableView === 'custom' ? '3.4%' : '6%', textAlign: 'center', padding: tableView === 'custom' ? '7px 2px' : '7px 4px', fontSize: tableView === 'custom' ? '0.63rem' : '0.67rem', color: 'var(--text-secondary)' }}>
-                Acción
-              </th>
             </tr>
           </thead>
           <tbody>
             {paginatedStocks.map(stock => {
               const analysis = calculateFactorGrades(stock);
               const isSelected = selectedStock?.ticker === stock.ticker;
+              const fcfVal = computeStockFCF(stock);
+              const tgtDiff = computeTargetDiff(stock);
 
               return (
                 <tr 
@@ -1630,37 +1670,74 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                         {stock.target_price ? `$${stock.target_price.toFixed(1)}` : '—'}
                       </td>
 
-                      {/* 18. PEG */}
+                      {/* 18. Dif. Tgt (Target Price vs Precio Actual) */}
+                      <td
+                        className="font-mono"
+                        style={{
+                          padding: '3px 2px',
+                          textAlign: 'right',
+                          whiteSpace: 'nowrap',
+                          lineHeight: 1.15
+                        }}
+                        title={
+                          tgtDiff
+                            ? `Diferencia Tgt Prc ($${stock.target_price?.toFixed(2)}) vs Precio ($${stock.price?.toFixed(2)}): ${tgtDiff.diffUsd >= 0 ? '+' : ''}$${tgtDiff.diffUsd.toFixed(2)} USD (${tgtDiff.diffPct >= 0 ? '+' : ''}${tgtDiff.diffPct.toFixed(2)}%)`
+                            : 'Sin Target Price disponible'
+                        }
+                      >
+                        {tgtDiff ? (
+                          <div style={{ color: tgtDiff.diffPct >= 0 ? 'var(--accent-green)' : '#ef4444', fontWeight: 700 }}>
+                            <div>{tgtDiff.diffPct >= 0 ? '+' : ''}{tgtDiff.diffPct.toFixed(1)}%</div>
+                            <div style={{ fontSize: '0.57rem', opacity: 0.85 }}>
+                              {tgtDiff.diffUsd >= 0 ? '+$' : '-$'}{Math.abs(tgtDiff.diffUsd).toFixed(1)}
+                            </div>
+                          </div>
+                        ) : '—'}
+                      </td>
+
+                      {/* 19. PEG */}
                       <td className="font-mono" style={{ padding: '4px 2px', textAlign: 'right', fontWeight: 600, color: (stock.peg && stock.peg < 1.0) ? 'var(--accent-green)' : 'inherit', whiteSpace: 'nowrap' }}>
                         {stock.peg ? stock.peg.toFixed(2) : '—'}
                       </td>
 
-                      {/* 19. Current Ratio */}
+                      {/* 20. Current Ratio */}
                       <td className="font-mono" style={{ padding: '4px 2px', textAlign: 'right', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                         {stock.curr_r ? stock.curr_r.toFixed(2) : '—'}
                       </td>
 
-                      {/* 20. Debt / Equity */}
+                      {/* 21. Debt / Equity */}
                       <td className="font-mono" style={{ padding: '4px 2px', textAlign: 'right', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                         {stock.debt_eq !== undefined && stock.debt_eq !== null ? stock.debt_eq.toFixed(2) : '—'}
                       </td>
 
-                      {/* 21. EPS */}
+                      {/* 22. EPS */}
                       <td className="font-mono" style={{ padding: '4px 2px', textAlign: 'right', color: '#fff', whiteSpace: 'nowrap' }}>
                         {stock.eps ? stock.eps.toFixed(2) : '—'}
                       </td>
 
-                      {/* 22. EPS Past 3Y */}
-                      <td className="font-mono" style={{ padding: '4px 2px', textAlign: 'right', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                        {stock.eps_past_3y ? formatPercentage(stock.eps_past_3y, 1) : '—'}
+                      {/* 23. FCF (Free Cash Flow) */}
+                      <td
+                        className="font-mono"
+                        style={{
+                          padding: '4px 2px',
+                          textAlign: 'right',
+                          fontWeight: 600,
+                          color: fcfVal !== null ? (fcfVal >= 0 ? 'var(--accent-green)' : '#ef4444') : 'var(--text-muted)',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}
+                        title={fcfVal !== null ? `Free Cash Flow: ${formatCurrencyUSD(fcfVal)}` : 'FCF no disponible'}
+                      >
+                        {fcfVal !== null ? formatCurrencyUSD(fcfVal, { shortUnit: true, decimals: 1, spaceBeforeUnit: false }) : '—'}
                       </td>
 
-                      {/* 23. ROIC */}
+                      {/* 24. ROIC */}
                       <td className="font-mono" style={{ padding: '4px 2px', textAlign: 'right', fontWeight: 700, color: (stock.roic ?? 0) >= 15 ? 'var(--accent-green)' : 'inherit', whiteSpace: 'nowrap' }}>
                         {stock.roic ? `${stock.roic.toFixed(1)}%` : '—'}
                       </td>
 
-                      {/* 24. SMA 200 */}
+                      {/* 25. SMA 200 */}
                       <td className="font-mono" style={{ padding: '4px 2px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         {stock.sma200 !== undefined && stock.sma200 !== null ? (
                           <span style={{ color: stock.sma200 >= 0 ? 'var(--accent-green)' : '#ef4444', fontWeight: 600 }}>
@@ -1669,17 +1746,17 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                         ) : '—'}
                       </td>
 
-                      {/* 25. Sales (Formato Moneda USD en B USD / M USD / T USD) */}
+                      {/* 26. Sales (Formato Moneda USD en B USD / M USD / T USD) */}
                       <td className="font-mono" style={{ padding: '4px 2px', textAlign: 'right', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={stock.sales ? `$${stock.sales.toLocaleString()} USD` : ''}>
                         {formatCurrencyUSD(stock.sales, { shortUnit: true })}
                       </td>
 
-                      {/* 26. Sales YoY TTM */}
+                      {/* 27. Sales YoY TTM */}
                       <td className="font-mono" style={{ padding: '4px 2px', textAlign: 'right', color: (stock.sales_yoy_ttm ?? 0) >= 10 ? 'var(--accent-green)' : 'inherit', whiteSpace: 'nowrap' }}>
                         {stock.sales_yoy_ttm ? formatPercentage(stock.sales_yoy_ttm, 1) : '—'}
                       </td>
 
-                      {/* 27. Quant Rating (Pill Cuantitativo de Screener Quant) */}
+                      {/* 28. Quant Rating (Pill Cuantitativo de Screener Quant) */}
                       <td style={{ padding: '4px 2px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                           <span 
@@ -1699,21 +1776,6 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                             {analysis.quantRating.startsWith('Fuerte C') ? 'F. Compra' : analysis.quantRating}
                           </span>
                         </div>
-                      </td>
-
-                      {/* 28. Columna Acción (Ver / Analizar de Screener Quant) */}
-                      <td style={{ padding: '4px 2px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                        <button 
-                          className="btn btn-secondary" 
-                          style={{ padding: '2px 6px', fontSize: '0.62rem' }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSelectStock(stock);
-                          }}
-                          title="Abrir análisis exhaustivo e informe institucional"
-                        >
-                          <Eye size={10} /> Ver
-                        </button>
                       </td>
                     </>
                   )}
@@ -1797,19 +1859,6 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                           </span>
                           <span style={{ fontSize: '0.68rem', fontWeight: 600 }}>{analysis.quantRating}</span>
                         </div>
-                      </td>
-
-                      <td style={{ padding: '6px 4px', textAlign: 'center' }}>
-                        <button 
-                          className="btn btn-secondary" 
-                          style={{ padding: '3px 8px', fontSize: '0.68rem' }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSelectStock(stock);
-                          }}
-                        >
-                          <Eye size={11} /> Ver
-                        </button>
                       </td>
                     </>
                   )}
