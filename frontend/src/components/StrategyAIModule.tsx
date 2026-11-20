@@ -22,6 +22,14 @@ import {
 } from 'lucide-react';
 import type { StockRecord } from '../types/stock';
 import { formatCurrencyUSD } from '../utils/formatters';
+import {
+  loadRiskSimConfig,
+  saveRiskSimConfig,
+  calculatePositionSimulation,
+  RISK_SIM_UPDATED_EVENT,
+  type RiskSimConfig,
+  type RiskSizingMode
+} from '../utils/riskSimulator';
 
 interface StrategyAIModuleProps {
   stocks: StockRecord[];
@@ -117,6 +125,57 @@ export const StrategyAIModule: React.FC<StrategyAIModuleProps> = ({ stocks, onSe
   const [activeSubTab, setActiveSubTab] = useState<'feed' | 'positions'>('feed');
   const [isScanning, setIsScanning] = useState(false);
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
+
+  // Simulador interactivo de capital y riesgo (sincronizado con Análisis de Acción)
+  const [riskSim, setRiskSim] = useState<RiskSimConfig>(() => loadRiskSimConfig());
+  const [capitalDraft, setCapitalDraft] = useState<string>(() => String(loadRiskSimConfig().capital));
+  const [riskDraft, setRiskDraft] = useState<string>(() => String(loadRiskSimConfig().riskPct));
+
+  useEffect(() => {
+    const onExternalUpdate = (e: Event) => {
+      const detail = (e as CustomEvent<RiskSimConfig>).detail;
+      if (detail) {
+        setRiskSim(detail);
+        setCapitalDraft(String(detail.capital));
+        setRiskDraft(String(detail.riskPct));
+      }
+    };
+    window.addEventListener(RISK_SIM_UPDATED_EVENT, onExternalUpdate);
+    return () => window.removeEventListener(RISK_SIM_UPDATED_EVENT, onExternalUpdate);
+  }, []);
+
+  const updateRiskSim = (partial: Partial<RiskSimConfig>) => {
+    const next: RiskSimConfig = {
+      ...riskSim,
+      ...partial,
+    };
+    setRiskSim(next);
+    if (partial.capital !== undefined) setCapitalDraft(String(next.capital));
+    if (partial.riskPct !== undefined) setRiskDraft(String(next.riskPct));
+    saveRiskSimConfig(next);
+  };
+
+  const getCandidateTierInfo = (cand: ScanCandidateItem) => {
+    const tierPct = cand.verdictType === 'TOP1' ? 3 : cand.verdictType === 'TOP2' ? 2 : 1;
+    const tierLabel =
+      cand.verdictType === 'TOP1'
+        ? 'ALTA CONVICCIÓN'
+        : cand.verdictType === 'TOP2'
+        ? 'CONVICCIÓN MEDIA-ALTA'
+        : 'FRANCOTIRADOR EN SOPORTE';
+    const tierUsd = Number((riskSim.capital * (tierPct / 100)).toFixed(2));
+    const usdStr = `$${tierUsd.toLocaleString('en-US', { minimumFractionDigits: tierUsd % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })} USD`;
+    const isTop = cand.verdictType === 'TOP1' || cand.verdictType === 'TOP2' || cand.verdictType === 'TOP3';
+    const topIdx = cand.verdictType === 'TOP1' ? 1 : cand.verdictType === 'TOP2' ? 2 : 3;
+    return {
+      tierPct,
+      tierUsd,
+      usdStr,
+      tierLabel,
+      dynamicVerdict: isTop ? `TOP ${topIdx} · TRAMO ${usdStr} (${tierPct}%)` : cand.verdict,
+      dynamicTierFull: `${usdStr} (${tierPct}% · ${tierLabel})`,
+    };
+  };
 
   // Muro / Feed acumulado en localStorage
   const [feedArticles, setFeedArticles] = useState<InstitutionalDailyArticle[]>(() => {
@@ -875,7 +934,7 @@ export const StrategyAIModule: React.FC<StrategyAIModuleProps> = ({ stocks, onSe
                                 : 'var(--text-secondary)',
                               border: isTop ? '1px solid currentColor' : '1px solid var(--border-subtle)'
                             }}>
-                              {cand.verdict}
+                              {getCandidateTierInfo(cand).dynamicVerdict}
                             </span>
                           </td>
                         </tr>
@@ -895,6 +954,182 @@ export const StrategyAIModule: React.FC<StrategyAIModuleProps> = ({ stocks, onSe
                 </h3>
               </div>
 
+              {/* Simulador Interactivo de Capital y Riesgo para Top 3 */}
+              {(() => {
+                const top3Sims = activeArticle.top3Candidates.map((cand) =>
+                  calculatePositionSimulation({
+                    ...riskSim,
+                    entryPrice: cand.price,
+                    stopLossPrice: cand.stopLossPrice,
+                    target1Price: cand.target1Price,
+                    target2Price: cand.target2Price,
+                  })
+                );
+                const totalPositionUsd = top3Sims.reduce((acc, s) => acc + s.positionUsd, 0);
+                const totalRiskStopUsd = top3Sims.reduce((acc, s) => acc + s.riskAtStopUsd, 0);
+                const totalGainT1Usd = top3Sims.reduce((acc, s) => acc + s.gainT1Usd, 0);
+                const totalGainT2Usd = top3Sims.reduce((acc, s) => acc + s.gainT2Usd, 0);
+                const cap = riskSim.capital > 0 ? riskSim.capital : 1;
+
+                return (
+                  <div style={{
+                    background: 'rgba(15, 23, 42, 0.72)',
+                    border: '1px solid rgba(6, 182, 212, 0.35)',
+                    borderRadius: '12px',
+                    padding: '16px 18px',
+                    marginBottom: '18px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800, fontSize: '0.92rem', color: 'var(--accent-cyan)' }}>
+                          <DollarSign size={16} /> Simulador de Capital y Riesgo Operativo (Ganancias / Pérdidas)
+                        </div>
+                        <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                          Ingresa tu capital y % de riesgo por operación para ver en vivo cuánto invertirías, pérdida en Stop Loss y ganancia potencial en Target 1 y Target 2.
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '4px', background: '#070b14', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                        <button
+                          type="button"
+                          className={`btn ${riskSim.sizingMode === 'stop_risk' ? 'btn-active' : 'btn-secondary'}`}
+                          style={{ padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700 }}
+                          onClick={() => updateRiskSim({ sizingMode: 'stop_risk' })}
+                        >
+                          Riesgo en Stop Loss
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn ${riskSim.sizingMode === 'capital_alloc' ? 'btn-active' : 'btn-secondary'}`}
+                          style={{ padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700 }}
+                          onClick={() => updateRiskSim({ sizingMode: 'capital_alloc' })}
+                        >
+                          % Capital Asignado
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', marginBottom: '14px' }}>
+                      <div style={{ background: '#070b14', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '10px 12px' }}>
+                        <label style={{ display: 'block', fontSize: '0.70rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '6px' }}>
+                          Tu Capital Total (USD)
+                        </label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <input
+                            type="number"
+                            min={10}
+                            step={100}
+                            value={capitalDraft}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              setCapitalDraft(raw);
+                              const num = Number(raw);
+                              if (Number.isFinite(num) && num >= 10) updateRiskSim({ capital: Number(num.toFixed(2)) });
+                            }}
+                            onBlur={() => setCapitalDraft(String(riskSim.capital))}
+                            className="font-mono"
+                            style={{ width: '115px', padding: '6px 10px', background: 'var(--bg-surface)', border: '1px solid var(--border-medium)', borderRadius: '6px', color: '#fff', fontSize: '0.88rem', fontWeight: 800, outline: 'none' }}
+                          />
+                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                            {[1500, 5000, 10000, 25000].map(preset => (
+                              <button
+                                key={preset}
+                                type="button"
+                                className={`btn ${riskSim.capital === preset ? 'btn-active' : 'btn-secondary'}`}
+                                style={{ padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700 }}
+                                onClick={() => updateRiskSim({ capital: preset })}
+                              >
+                                ${preset.toLocaleString('en-US')}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#070b14', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '10px 12px' }}>
+                        <label style={{ display: 'block', fontSize: '0.70rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '6px' }}>
+                          {riskSim.sizingMode === 'stop_risk' ? '% de Riesgo por Operación (Stop Loss)' : '% de Capital por Operación'}
+                        </label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <input
+                            type="number"
+                            min={0.1}
+                            max={100}
+                            step={0.5}
+                            value={riskDraft}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              setRiskDraft(raw);
+                              const num = Number(raw);
+                              if (Number.isFinite(num) && num >= 0.1 && num <= 100) updateRiskSim({ riskPct: Number(num.toFixed(2)) });
+                            }}
+                            onBlur={() => setRiskDraft(String(riskSim.riskPct))}
+                            className="font-mono"
+                            style={{ width: '86px', padding: '6px 10px', background: 'var(--bg-surface)', border: '1px solid var(--border-medium)', borderRadius: '6px', color: '#fff', fontSize: '0.88rem', fontWeight: 800, outline: 'none' }}
+                          />
+                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                            {[1, 2, 3, 5].map(pct => (
+                              <button
+                                key={pct}
+                                type="button"
+                                className={`btn ${riskSim.riskPct === pct ? 'btn-active' : 'btn-secondary'}`}
+                                style={{ padding: '3px 8px', fontSize: '0.68rem', fontWeight: 700 }}
+                                onClick={() => updateRiskSim({ riskPct: pct })}
+                              >
+                                {pct}%
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Resumen combinado del Top 3 */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: '10px' }}>
+                      <div style={{ background: '#070b14', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(6, 182, 212, 0.28)' }}>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>Exposición Total (Top 3)</div>
+                        <div className="font-mono" style={{ fontSize: '1.05rem', fontWeight: 900, color: '#fff', marginTop: '2px' }}>
+                          ${totalPositionUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                        </div>
+                        <div className="font-mono" style={{ fontSize: '0.68rem', color: 'var(--accent-cyan)' }}>
+                          {((totalPositionUsd / cap) * 100).toFixed(1)}% de tu capital
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#070b14', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.35)' }}>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--accent-red)', fontWeight: 700 }}>Pérdida Máx. Combinada (SL)</div>
+                        <div className="font-mono" style={{ fontSize: '1.05rem', fontWeight: 900, color: 'var(--accent-red)', marginTop: '2px' }}>
+                          -${totalRiskStopUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                        </div>
+                        <div className="font-mono" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>
+                          -{((totalRiskStopUsd / cap) * 100).toFixed(2)}% de tu capital
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#070b14', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.35)' }}>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--accent-green)', fontWeight: 700 }}>Ganancia Combinada Target 1</div>
+                        <div className="font-mono" style={{ fontSize: '1.05rem', fontWeight: 900, color: 'var(--accent-green)', marginTop: '2px' }}>
+                          +${totalGainT1Usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                        </div>
+                        <div className="font-mono" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>
+                          +{((totalGainT1Usd / cap) * 100).toFixed(2)}% de tu capital
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#070b14', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(6, 182, 212, 0.35)' }}>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--accent-cyan)', fontWeight: 700 }}>Ganancia Combinada Target 2</div>
+                        <div className="font-mono" style={{ fontSize: '1.05rem', fontWeight: 900, color: 'var(--accent-cyan)', marginTop: '2px' }}>
+                          +${totalGainT2Usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                        </div>
+                        <div className="font-mono" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>
+                          +{((totalGainT2Usd / cap) * 100).toFixed(2)}% de tu capital
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Grid Comparativo de 3 Columnas Estándar analista-inversor / escaneador-acciones */}
               <div style={{
                 display: 'grid',
@@ -903,6 +1138,14 @@ export const StrategyAIModule: React.FC<StrategyAIModuleProps> = ({ stocks, onSe
               }}>
                 {activeArticle.top3Candidates.map((topCand, index) => {
                   const borderAccent = index === 0 ? 'var(--accent-green)' : index === 1 ? 'var(--accent-cyan)' : '#f59e0b';
+                  const tierInfo = getCandidateTierInfo(topCand);
+                  const sim = calculatePositionSimulation({
+                    ...riskSim,
+                    entryPrice: topCand.price,
+                    stopLossPrice: topCand.stopLossPrice,
+                    target1Price: topCand.target1Price,
+                    target2Price: topCand.target2Price,
+                  });
 
                   return (
                     <div 
@@ -942,7 +1185,7 @@ export const StrategyAIModule: React.FC<StrategyAIModuleProps> = ({ stocks, onSe
                             color: borderAccent,
                             border: `1px solid ${borderAccent}`
                           }}>
-                            {topCand.verdict.split('·')[1]?.trim() || 'TRAMO ASIGNADO'}
+                            {tierInfo.tierPct}% · {tierInfo.usdStr}
                           </span>
                         </div>
 
@@ -997,17 +1240,77 @@ export const StrategyAIModule: React.FC<StrategyAIModuleProps> = ({ stocks, onSe
                           </p>
                         </div>
 
-                        {/* Dimensión 6: Tramo Recomendado y Convicción */}
-                        <div style={{ marginBottom: '16px' }}>
+                        {/* Dimensión 6: Tramo Recomendado y Convicción (escalado a Tu Capital) */}
+                        <div style={{ marginBottom: '12px' }}>
                           <div style={{ fontSize: '0.70rem', fontWeight: 800, color: borderAccent, textTransform: 'uppercase', marginBottom: '2px' }}>
-                            Tramo Recomendado & Convicción
+                            6. Tramo Recomendado &amp; Convicción
                           </div>
                           <div style={{ fontWeight: 800, fontSize: '0.82rem', color: '#fff' }}>
-                            {topCand.convictionTier}
+                            {tierInfo.dynamicTierFull}
                           </div>
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
                             {topCand.convictionDetail}
                           </div>
+                        </div>
+
+                        {/* Simulación Operativa con Tu Capital y % Riesgo */}
+                        <div style={{
+                          marginBottom: '14px',
+                          background: 'rgba(15, 23, 42, 0.72)',
+                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          borderRadius: '8px',
+                          padding: '10px 12px',
+                          fontSize: '0.74rem'
+                        }}>
+                          <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                            Simulación Operativa (${riskSim.capital.toLocaleString('en-US')} USD · {riskSim.riskPct}% {riskSim.sizingMode === 'stop_risk' ? 'riesgo SL' : 'capital'})
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                            <div style={{ background: '#070b14', borderRadius: '6px', padding: '7px 8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Inversión / Acciones</div>
+                              <div className="font-mono" style={{ fontWeight: 800, color: '#fff' }}>
+                                ${sim.positionUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                              <div className="font-mono" style={{ fontSize: '0.66rem', color: 'var(--accent-cyan)' }}>
+                                {sim.shares} acc ({sim.positionCapPct.toFixed(1)}%)
+                              </div>
+                            </div>
+
+                            <div style={{ background: '#070b14', borderRadius: '6px', padding: '7px 8px', border: '1px solid rgba(239,68,68,0.28)' }}>
+                              <div style={{ fontSize: '0.65rem', color: 'var(--accent-red)' }}>Pérdida SL (-{topCand.stopLossPct}%)</div>
+                              <div className="font-mono" style={{ fontWeight: 800, color: 'var(--accent-red)' }}>
+                                -${sim.riskAtStopUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                              <div className="font-mono" style={{ fontSize: '0.66rem', color: 'var(--text-secondary)' }}>
+                                -{sim.riskAtStopCapPct.toFixed(2)}% cap.
+                              </div>
+                            </div>
+
+                            <div style={{ background: '#070b14', borderRadius: '6px', padding: '7px 8px', border: '1px solid rgba(16,185,129,0.28)' }}>
+                              <div style={{ fontSize: '0.65rem', color: 'var(--accent-green)' }}>Ganancia T1 (+{topCand.target1Pct}%)</div>
+                              <div className="font-mono" style={{ fontWeight: 800, color: 'var(--accent-green)' }}>
+                                +${sim.gainT1Usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                              <div className="font-mono" style={{ fontSize: '0.66rem', color: 'var(--text-secondary)' }}>
+                                +{sim.gainT1CapPct.toFixed(2)}% cap.
+                              </div>
+                            </div>
+
+                            <div style={{ background: '#070b14', borderRadius: '6px', padding: '7px 8px', border: '1px solid rgba(6,182,212,0.28)' }}>
+                              <div style={{ fontSize: '0.65rem', color: 'var(--accent-cyan)' }}>Ganancia T2 (+{topCand.target2Pct}%)</div>
+                              <div className="font-mono" style={{ fontWeight: 800, color: 'var(--accent-cyan)' }}>
+                                +${sim.gainT2Usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                              <div className="font-mono" style={{ fontSize: '0.66rem', color: 'var(--text-secondary)' }}>
+                                50/50: +${sim.gainTrailing5050Usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                            </div>
+                          </div>
+                          {sim.cappedByCapital && (
+                            <div style={{ fontSize: '0.65rem', color: '#f59e0b', marginTop: '6px', fontWeight: 700 }}>
+                              Topeado al 100% de tu capital sin apalancamiento.
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -1085,80 +1388,156 @@ export const StrategyAIModule: React.FC<StrategyAIModuleProps> = ({ stocks, onSe
       {/* 4. SUBMÓDULO B: REGISTRO CONSOLIDADO DE POSICIONES DE TRADING */}
       {activeSubTab === 'positions' && (
         <div className="glass-panel" style={{ padding: '24px', borderRadius: '12px' }}>
-          <div style={{ marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#fff', margin: '0 0 4px 0' }}>
-              Registro Consolidado de Posiciones de Trading Recomendadas
-            </h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', margin: 0 }}>
-              Bitácora histórica día a día generada por el agente para evitar duplicados y controlar el estado de <code>Invertido == "Si"</code>.
-            </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '14px', marginBottom: '16px' }}>
+            <div>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#fff', margin: '0 0 4px 0' }}>
+                Registro Consolidado de Posiciones de Trading Recomendadas
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', margin: 0 }}>
+                Bitácora histórica día a día con simulación P&amp;L en vivo según tu capital y porcentaje de riesgo.
+              </p>
+            </div>
+
+            {/* Barra compacta sincronizada de Capital y % Riesgo */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', padding: '8px 12px', background: '#070b14', border: '1px solid var(--border-subtle)', borderRadius: '8px', fontSize: '0.75rem' }}>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>Capital (USD):</span>
+              <input
+                type="number"
+                min={10}
+                step={100}
+                value={capitalDraft}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setCapitalDraft(raw);
+                  const num = Number(raw);
+                  if (Number.isFinite(num) && num >= 10) updateRiskSim({ capital: Number(num.toFixed(2)) });
+                }}
+                onBlur={() => setCapitalDraft(String(riskSim.capital))}
+                className="font-mono"
+                style={{ width: '92px', padding: '4px 8px', background: 'var(--bg-surface)', border: '1px solid var(--border-medium)', borderRadius: '6px', color: '#fff', fontWeight: 800 }}
+              />
+              <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>Riesgo (%):</span>
+              <input
+                type="number"
+                min={0.1}
+                max={100}
+                step={0.5}
+                value={riskDraft}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setRiskDraft(raw);
+                  const num = Number(raw);
+                  if (Number.isFinite(num) && num >= 0.1 && num <= 100) updateRiskSim({ riskPct: Number(num.toFixed(2)) });
+                }}
+                onBlur={() => setRiskDraft(String(riskSim.riskPct))}
+                className="font-mono"
+                style={{ width: '68px', padding: '4px 8px', background: 'var(--bg-surface)', border: '1px solid var(--border-medium)', borderRadius: '6px', color: '#fff', fontWeight: 800 }}
+              />
+              <select
+                value={riskSim.sizingMode}
+                onChange={(e) => updateRiskSim({ sizingMode: e.target.value as RiskSizingMode })}
+                style={{ background: 'var(--bg-surface)', color: '#fff', border: '1px solid var(--border-medium)', borderRadius: '6px', padding: '4px 8px', fontSize: '0.73rem' }}
+              >
+                <option value="stop_risk">Riesgo en SL</option>
+                <option value="capital_alloc">% Capital</option>
+              </select>
+            </div>
           </div>
 
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', fontSize: '0.78rem', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#090e1c', borderBottom: '1px solid var(--border-medium)', textAlign: 'left', color: 'var(--text-muted)' }}>
-                  <th style={{ padding: '10px 12px' }}>Fecha</th>
-                  <th style={{ padding: '10px 12px' }}>Ticker</th>
-                  <th style={{ padding: '10px 12px' }}>Compañía</th>
-                  <th style={{ padding: '10px 12px' }}>Subsector</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>Entrada ($)</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>Stop Loss ($)</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>Target 1 ($)</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>Target 2 ($)</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'center' }}>R:R (T1)</th>
-                  <th style={{ padding: '10px 12px' }}>Tramo Convicción</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'center' }}>Invertido</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'center' }}>Acción</th>
+                  <th style={{ padding: '10px 10px' }}>Fecha</th>
+                  <th style={{ padding: '10px 10px' }}>Ticker</th>
+                  <th style={{ padding: '10px 10px' }}>Compañía</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'right' }}>Entrada ($)</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'right' }}>Stop Loss ($)</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'right' }}>Target 1 ($)</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'right' }}>Target 2 ($)</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'right' }}>Posición ($ / acc)</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'right' }}>Pérdida SL</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'right' }}>Ganancia T1</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'right' }}>Ganancia T2</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'center' }}>R:R (T1)</th>
+                  <th style={{ padding: '10px 10px' }}>Tramo</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'center' }}>Invertido</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'center' }}>Acción</th>
                 </tr>
               </thead>
               <tbody>
-                {consolidatedPositions.map(({ articleDate, item }) => (
-                  <tr key={`${articleDate}-${item.ticker}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                    <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{articleDate}</td>
-                    <td className="font-mono" style={{ padding: '10px 12px', fontWeight: 800, color: '#fff' }}>{item.ticker}</td>
-                    <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{item.company}</td>
-                    <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{item.subsector}</td>
-                    <td className="font-mono" style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: '#fff' }}>${item.price.toFixed(2)}</td>
-                    <td className="font-mono" style={{ padding: '10px 12px', textAlign: 'right', color: 'var(--accent-red)' }}>${item.stopLossPrice}</td>
-                    <td className="font-mono" style={{ padding: '10px 12px', textAlign: 'right', color: 'var(--accent-green)' }}>${item.target1Price}</td>
-                    <td className="font-mono" style={{ padding: '10px 12px', textAlign: 'right', color: 'var(--accent-cyan)' }}>${item.target2Price}</td>
-                    <td className="font-mono" style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 700, color: 'var(--accent-green)' }}>{item.rrRatioT1}:1</td>
-                    <td style={{ padding: '10px 12px' }}>
-                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent-cyan)' }}>
-                        {item.convictionTier.split('·')[0]}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                      <button
-                        onClick={() => toggleInvested(item.ticker, articleDate)}
-                        style={{
-                          background: item.invested ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
-                          border: `1px solid ${item.invested ? 'var(--accent-green)' : 'var(--border-subtle)'}`,
-                          color: item.invested ? 'var(--accent-green)' : 'var(--text-muted)',
-                          borderRadius: '4px',
-                          padding: '3px 8px',
-                          fontSize: '0.72rem',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {item.invested ? 'Sí' : 'No'}
-                      </button>
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                      <button
-                        onClick={() => {
-                          const found = stocks.find(s => s.ticker === item.ticker);
-                          if (found) onSelectStock(found);
-                        }}
-                        className="btn btn-secondary"
-                        style={{ padding: '3px 8px', fontSize: '0.70rem' }}
-                      >
-                        Ver
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {consolidatedPositions.map(({ articleDate, item }) => {
+                  const tierInfo = getCandidateTierInfo(item);
+                  const sim = calculatePositionSimulation({
+                    ...riskSim,
+                    entryPrice: item.price,
+                    stopLossPrice: item.stopLossPrice,
+                    target1Price: item.target1Price,
+                    target2Price: item.target2Price,
+                  });
+
+                  return (
+                    <tr key={`${articleDate}-${item.ticker}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                      <td style={{ padding: '10px 10px', color: 'var(--text-muted)' }}>{articleDate}</td>
+                      <td className="font-mono" style={{ padding: '10px 10px', fontWeight: 800, color: '#fff' }}>{item.ticker}</td>
+                      <td style={{ padding: '10px 10px', color: 'var(--text-secondary)' }}>
+                        <div>{item.company}</div>
+                        <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>{item.subsector}</div>
+                      </td>
+                      <td className="font-mono" style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 700, color: '#fff' }}>${item.price.toFixed(2)}</td>
+                      <td className="font-mono" style={{ padding: '10px 10px', textAlign: 'right', color: 'var(--accent-red)' }}>${item.stopLossPrice}</td>
+                      <td className="font-mono" style={{ padding: '10px 10px', textAlign: 'right', color: 'var(--accent-green)' }}>${item.target1Price}</td>
+                      <td className="font-mono" style={{ padding: '10px 10px', textAlign: 'right', color: 'var(--accent-cyan)' }}>${item.target2Price}</td>
+                      <td className="font-mono" style={{ padding: '10px 10px', textAlign: 'right' }}>
+                        <div style={{ fontWeight: 700, color: '#fff' }}>${sim.positionUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>{sim.shares} acc</div>
+                      </td>
+                      <td className="font-mono" style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--accent-red)' }}>
+                        -${sim.riskAtStopUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td className="font-mono" style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--accent-green)' }}>
+                        +${sim.gainT1Usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td className="font-mono" style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                        +${sim.gainT2Usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td className="font-mono" style={{ padding: '10px 10px', textAlign: 'center', fontWeight: 700, color: 'var(--accent-green)' }}>{item.rrRatioT1}:1</td>
+                      <td style={{ padding: '10px 10px' }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                          {tierInfo.usdStr} ({tierInfo.tierPct}%)
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 10px', textAlign: 'center' }}>
+                        <button
+                          onClick={() => toggleInvested(item.ticker, articleDate)}
+                          style={{
+                            background: item.invested ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
+                            border: `1px solid ${item.invested ? 'var(--accent-green)' : 'var(--border-subtle)'}`,
+                            color: item.invested ? 'var(--accent-green)' : 'var(--text-muted)',
+                            borderRadius: '4px',
+                            padding: '3px 8px',
+                            fontSize: '0.72rem',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {item.invested ? 'Sí' : 'No'}
+                        </button>
+                      </td>
+                      <td style={{ padding: '10px 10px', textAlign: 'center' }}>
+                        <button
+                          onClick={() => {
+                            const found = stocks.find(s => s.ticker === item.ticker);
+                            if (found) onSelectStock(found);
+                          }}
+                          className="btn btn-secondary"
+                          style={{ padding: '3px 8px', fontSize: '0.70rem' }}
+                        >
+                          Ver
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

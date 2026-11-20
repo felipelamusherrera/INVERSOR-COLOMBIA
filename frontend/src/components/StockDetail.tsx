@@ -287,98 +287,328 @@ export function generateQuarterlyFinancials(stock: StockRecord): QuarterlyFinanc
   return buildQuarterlySeries(stock);
 }
 
-export interface VariabilityPoint {
-  horizon: string;
-  shortLabel: string;
-  changePct: number;
-  changeUsd: number;
-  sourceNote: string;
+export type VariabilityTimeframe = '4H' | '1D' | '3D' | '1S' | '1M';
+
+export interface IntradayBar4h {
+  label: string;
+  fullDate: string;
+  close: number;
 }
 
-function computePriceVariabilitySeries(
+export interface VariabilitySeriesPoint {
+  label: string;
+  fullDate: string;
+  periodDesc: string;
+  prevClose: number;
+  close: number;
+  changePct: number;
+  changeUsd: number;
+}
+
+export interface VariabilitySeriesResult {
+  timeframe: VariabilityTimeframe;
+  timelineLabel: string;
+  sourceLabel: string;
+  points: VariabilitySeriesPoint[];
+  lastPoint: VariabilitySeriesPoint | null;
+  avgAbsPct: number;
+  stdDevPct: number;
+  maxGain: VariabilitySeriesPoint | null;
+  maxDrop: VariabilitySeriesPoint | null;
+  positiveCount: number;
+  negativeCount: number;
+}
+
+const MONTHS_ES_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+function getIsoWeekKey(dateStr: string): string {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return dateStr.slice(0, 7);
+  const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+function formatMonthLabelEs(yyyyMm: string): string {
+  const [y, m] = yyyyMm.split('-').map(Number);
+  if (!y || !m || m < 1 || m > 12) return yyyyMm;
+  return `${MONTHS_ES_SHORT[m - 1]} '${String(y).slice(2)}`;
+}
+
+function buildVariabilityStats(
+  timeframe: VariabilityTimeframe,
+  timelineLabel: string,
+  sourceLabel: string,
+  points: VariabilitySeriesPoint[]
+): VariabilitySeriesResult {
+  if (points.length === 0) {
+    return {
+      timeframe,
+      timelineLabel,
+      sourceLabel,
+      points: [],
+      lastPoint: null,
+      avgAbsPct: 0,
+      stdDevPct: 0,
+      maxGain: null,
+      maxDrop: null,
+      positiveCount: 0,
+      negativeCount: 0,
+    };
+  }
+
+  let absSum = 0;
+  let sum = 0;
+  let positiveCount = 0;
+  let negativeCount = 0;
+  let maxGain = points[0];
+  let maxDrop = points[0];
+
+  for (const pt of points) {
+    absSum += Math.abs(pt.changePct);
+    sum += pt.changePct;
+    if (pt.changePct >= 0) positiveCount++;
+    else negativeCount++;
+    if (pt.changePct > maxGain.changePct) maxGain = pt;
+    if (pt.changePct < maxDrop.changePct) maxDrop = pt;
+  }
+
+  const mean = sum / points.length;
+  const variance = points.reduce((acc, p) => acc + Math.pow(p.changePct - mean, 2), 0) / points.length;
+
+  return {
+    timeframe,
+    timelineLabel,
+    sourceLabel,
+    points,
+    lastPoint: points[points.length - 1],
+    avgAbsPct: Number((absSum / points.length).toFixed(2)),
+    stdDevPct: Number(Math.sqrt(variance).toFixed(2)),
+    maxGain,
+    maxDrop,
+    positiveCount,
+    negativeCount,
+  };
+}
+
+function computeVariabilityTimeSeries(
+  tf: VariabilityTimeframe,
   stock: StockRecord,
   rawPoints: PricePoint[],
-  intraday4hPct: number | null
-): VariabilityPoint[] {
-  const currentPrice = stock.price ?? rawPoints[rawPoints.length - 1]?.price ?? 0;
-  const calcUsdDelta = (pct: number) => {
-    if (!currentPrice || 1 + pct / 100 <= 0) return 0;
-    const base = currentPrice / (1 + pct / 100);
-    return Number((currentPrice - base).toFixed(2));
-  };
+  intradayBars4h: IntradayBar4h[]
+): VariabilitySeriesResult {
+  const valid = rawPoints.filter((p) => {
+    const px = p.price ?? p.close ?? 0;
+    return px > 0 && Boolean(p.date);
+  });
 
-  // 1. 4 Horas
-  let pct4h = 0;
-  let note4h = 'Estimación sesión intradía';
-  if (intraday4hPct !== null) {
-    pct4h = intraday4hPct;
-    note4h = 'Horario 1H real';
-  } else if (stock.change_from_open_pct !== undefined && stock.change_from_open_pct !== null) {
-    pct4h = stock.change_from_open_pct;
-    note4h = 'Apertura intradía';
-  } else {
-    pct4h = Number(((stock.change_pct ?? 0) * 0.65).toFixed(2));
+  if (tf === '4H') {
+    if (intradayBars4h.length >= 4) {
+      const bars = intradayBars4h.slice(-37);
+      const pts: VariabilitySeriesPoint[] = [];
+      for (let i = 1; i < bars.length; i++) {
+        const prev = bars[i - 1];
+        const curr = bars[i];
+        const pct = prev.close > 0 ? ((curr.close - prev.close) / prev.close) * 100 : 0;
+        const usd = curr.close - prev.close;
+        pts.push({
+          label: curr.label,
+          fullDate: curr.fullDate,
+          periodDesc: `Bloque 4H: ${prev.fullDate} → ${curr.fullDate}`,
+          prevClose: Number(prev.close.toFixed(2)),
+          close: Number(curr.close.toFixed(2)),
+          changePct: Number(pct.toFixed(2)),
+          changeUsd: Number(usd.toFixed(2)),
+        });
+      }
+      return buildVariabilityStats('4H', `Últimos ${pts.length} bloques de 4 horas`, 'Barras 4H reales (Yahoo 1H)', pts);
+    }
+
+    // Respaldo determinístico desde bloques OHLC AM/PM de las últimas 18 sesiones
+    const recent = valid.slice(-19);
+    if (recent.length >= 2) {
+      const synthetic: IntradayBar4h[] = [
+        {
+          label: `${recent[0].date.slice(5)} PM`,
+          fullDate: `${recent[0].date} PM`,
+          close: Number((recent[0].price ?? recent[0].close ?? 0).toFixed(2)),
+        },
+      ];
+      for (let i = 1; i < recent.length; i++) {
+        const pt = recent[i];
+        const cl = pt.price ?? pt.close ?? 0;
+        const op = pt.open ?? cl;
+        const hi = pt.high ?? Math.max(op, cl);
+        const lo = pt.low ?? Math.min(op, cl);
+        const midRaw = (op + (cl >= op ? lo : hi) + cl) / 3;
+        const mid = Number(Math.min(hi, Math.max(lo, midRaw)).toFixed(2));
+        synthetic.push({
+          label: `${pt.date.slice(5)} AM`,
+          fullDate: `${pt.date} AM`,
+          close: mid,
+        });
+        synthetic.push({
+          label: `${pt.date.slice(5)} PM`,
+          fullDate: `${pt.date} PM`,
+          close: Number(cl.toFixed(2)),
+        });
+      }
+      const pts: VariabilitySeriesPoint[] = [];
+      for (let i = 1; i < synthetic.length; i++) {
+        const prev = synthetic[i - 1];
+        const curr = synthetic[i];
+        const pct = prev.close > 0 ? ((curr.close - prev.close) / prev.close) * 100 : 0;
+        pts.push({
+          label: curr.label,
+          fullDate: curr.fullDate,
+          periodDesc: `Bloque 4H: ${prev.fullDate} → ${curr.fullDate}`,
+          prevClose: prev.close,
+          close: curr.close,
+          changePct: Number(pct.toFixed(2)),
+          changeUsd: Number((curr.close - prev.close).toFixed(2)),
+        });
+      }
+      return buildVariabilityStats('4H', `Últimos ${pts.length} bloques de 4 horas (~${recent.length - 1} sesiones)`, 'Bloques 4H derivados de OHLC diario', pts);
+    }
+
+    const fallbackPx = stock.price ?? 0;
+    const fallbackPct = Number((stock.change_from_open_pct ?? (stock.change_pct ?? 0) * 0.65).toFixed(2));
+    const fallbackUsd = fallbackPx > 0 && 1 + fallbackPct / 100 > 0 ? Number((fallbackPx - fallbackPx / (1 + fallbackPct / 100)).toFixed(2)) : 0;
+    return buildVariabilityStats('4H', 'Sesión actual (sin histórico intradía)', 'Referencia apertura intradía', [
+      {
+        label: 'Hoy 4H',
+        fullDate: new Date().toISOString().slice(0, 10),
+        periodDesc: 'Variación intradía actual',
+        prevClose: Number((fallbackPx - fallbackUsd).toFixed(2)),
+        close: Number(fallbackPx.toFixed(2)),
+        changePct: fallbackPct,
+        changeUsd: fallbackUsd,
+      },
+    ]);
   }
 
-  // 2. 1 Día
-  let pct1d = stock.change_pct ?? null;
-  let note1d = 'Sesión diaria Finviz';
-  if (pct1d === null && rawPoints.length >= 2) {
-    const pLast = rawPoints[rawPoints.length - 1].price ?? currentPrice;
-    const pPrev = rawPoints[rawPoints.length - 2].price ?? pLast;
-    pct1d = pPrev > 0 ? ((pLast - pPrev) / pPrev) * 100 : 0;
-    note1d = 'Histórico diario';
+  if (tf === '1D') {
+    const slice = valid.slice(-61);
+    const pts: VariabilitySeriesPoint[] = [];
+    for (let i = 1; i < slice.length; i++) {
+      const prevPx = slice[i - 1].price ?? slice[i - 1].close ?? 0;
+      const currPx = slice[i].price ?? slice[i].close ?? 0;
+      const pct = prevPx > 0 ? ((currPx - prevPx) / prevPx) * 100 : 0;
+      pts.push({
+        label: slice[i].date.slice(5),
+        fullDate: slice[i].date,
+        periodDesc: `Sesión ${slice[i].date} (vs ${slice[i - 1].date})`,
+        prevClose: Number(prevPx.toFixed(2)),
+        close: Number(currPx.toFixed(2)),
+        changePct: Number(pct.toFixed(2)),
+        changeUsd: Number((currPx - prevPx).toFixed(2)),
+      });
+    }
+    return buildVariabilityStats('1D', `Últimas ${pts.length} sesiones diarias (~3 meses)`, 'Serie histórica diaria (1D)', pts);
   }
-  const final1d = Number((pct1d ?? 0).toFixed(2));
 
-  // 3. 3 Días
-  let pct3d: number | null = null;
-  let note3d = 'Histórico 3 sesiones';
-  if (rawPoints.length >= 4) {
-    const pLast = currentPrice || (rawPoints[rawPoints.length - 1].price ?? 0);
-    const p3 = rawPoints[rawPoints.length - 4].price ?? pLast;
-    if (p3 > 0) pct3d = ((pLast - p3) / p3) * 100;
+  if (tf === '3D') {
+    const slice = valid.slice(-136);
+    const pts: VariabilitySeriesPoint[] = [];
+    if (slice.length >= 4) {
+      const endpoints: number[] = [];
+      for (let idx = slice.length - 1; idx >= 0; idx -= 3) {
+        endpoints.unshift(idx);
+      }
+      for (let k = 1; k < endpoints.length; k++) {
+        const prevIdx = endpoints[k - 1];
+        const endIdx = endpoints[k];
+        const startPt = slice[prevIdx + 1] ?? slice[endIdx];
+        const endPt = slice[endIdx];
+        const prevPx = slice[prevIdx].price ?? slice[prevIdx].close ?? 0;
+        const currPx = endPt.price ?? endPt.close ?? 0;
+        const pct = prevPx > 0 ? ((currPx - prevPx) / prevPx) * 100 : 0;
+        pts.push({
+          label: endPt.date.slice(5),
+          fullDate: endPt.date,
+          periodDesc: `Bloque 3D: ${startPt.date} → ${endPt.date} (vs ${slice[prevIdx].date})`,
+          prevClose: Number(prevPx.toFixed(2)),
+          close: Number(currPx.toFixed(2)),
+          changePct: Number(pct.toFixed(2)),
+          changeUsd: Number((currPx - prevPx).toFixed(2)),
+        });
+      }
+    }
+    return buildVariabilityStats('3D', `Últimos ${pts.length} bloques de 3 sesiones (~6-7 meses)`, 'Bloques no solapados de 3 días', pts);
   }
-  if (pct3d === null) {
-    pct3d = stock.perf_week !== undefined && stock.perf_week !== null ? stock.perf_week * 0.6 : final1d * 1.6;
-    note3d = 'Estimado proporcional';
-  }
-  const final3d = Number(pct3d.toFixed(2));
 
-  // 4. 1 Semana
-  let pct1w = stock.perf_week ?? null;
-  let note1w = 'Rendimiento semanal';
-  if (pct1w === null && rawPoints.length >= 6) {
-    const pLast = currentPrice || (rawPoints[rawPoints.length - 1].price ?? 0);
-    const p5 = rawPoints[rawPoints.length - 6].price ?? pLast;
-    if (p5 > 0) pct1w = ((pLast - p5) / p5) * 100;
-    note1w = 'Histórico 5 sesiones';
+  if (tf === '1S') {
+    const weekGroups: { weekKey: string; endPt: PricePoint }[] = [];
+    for (const pt of valid) {
+      const wk = getIsoWeekKey(pt.date);
+      if (weekGroups.length > 0 && weekGroups[weekGroups.length - 1].weekKey === wk) {
+        weekGroups[weekGroups.length - 1].endPt = pt;
+      } else {
+        weekGroups.push({ weekKey: wk, endPt: pt });
+      }
+    }
+    const slice = weekGroups.slice(-53);
+    const pts: VariabilitySeriesPoint[] = [];
+    for (let i = 1; i < slice.length; i++) {
+      const prevPt = slice[i - 1].endPt;
+      const currPt = slice[i].endPt;
+      const prevPx = prevPt.price ?? prevPt.close ?? 0;
+      const currPx = currPt.price ?? currPt.close ?? 0;
+      const pct = prevPx > 0 ? ((currPx - prevPx) / prevPx) * 100 : 0;
+      pts.push({
+        label: currPt.date.slice(5),
+        fullDate: currPt.date,
+        periodDesc: `Semana ${slice[i].weekKey} (cierre ${currPt.date} vs ${prevPt.date})`,
+        prevClose: Number(prevPx.toFixed(2)),
+        close: Number(currPx.toFixed(2)),
+        changePct: Number(pct.toFixed(2)),
+        changeUsd: Number((currPx - prevPx).toFixed(2)),
+      });
+    }
+    return buildVariabilityStats('1S', `Últimas ${pts.length} semanas (~1 año)`, 'Cierre semanal (última sesión de semana)', pts);
   }
-  const final1w = Number((pct1w ?? final3d * 1.4).toFixed(2));
 
-  // 5. 1 Mes
-  let pct1m = stock.perf_month ?? null;
-  let note1m = 'Rendimiento mensual';
-  if (pct1m === null && rawPoints.length >= 22) {
-    const pLast = currentPrice || (rawPoints[rawPoints.length - 1].price ?? 0);
-    const p21 = rawPoints[rawPoints.length - 22].price ?? pLast;
-    if (p21 > 0) pct1m = ((pLast - p21) / p21) * 100;
-    note1m = 'Histórico 21 sesiones';
+  // '1M'
+  const monthGroups: { monthKey: string; endPt: PricePoint }[] = [];
+  for (const pt of valid) {
+    const mk = pt.date.slice(0, 7);
+    if (monthGroups.length > 0 && monthGroups[monthGroups.length - 1].monthKey === mk) {
+      monthGroups[monthGroups.length - 1].endPt = pt;
+    } else {
+      monthGroups.push({ monthKey: mk, endPt: pt });
+    }
   }
-  const final1m = Number((pct1m ?? final1w * 2.2).toFixed(2));
-
-  return [
-    { horizon: '4 Horas', shortLabel: '4H', changePct: Number(pct4h.toFixed(2)), changeUsd: calcUsdDelta(pct4h), sourceNote: note4h },
-    { horizon: '1 Día', shortLabel: '1D', changePct: final1d, changeUsd: calcUsdDelta(final1d), sourceNote: note1d },
-    { horizon: '3 Días', shortLabel: '3D', changePct: final3d, changeUsd: calcUsdDelta(final3d), sourceNote: note3d },
-    { horizon: '1 Semana', shortLabel: '1S', changePct: final1w, changeUsd: calcUsdDelta(final1w), sourceNote: note1w },
-    { horizon: '1 Mes', shortLabel: '1M', changePct: final1m, changeUsd: calcUsdDelta(final1m), sourceNote: note1m },
-  ];
+  const monthSlice = monthGroups.slice(-37);
+  const monthPts: VariabilitySeriesPoint[] = [];
+  for (let i = 1; i < monthSlice.length; i++) {
+    const prevPt = monthSlice[i - 1].endPt;
+    const currPt = monthSlice[i].endPt;
+    const prevPx = prevPt.price ?? prevPt.close ?? 0;
+    const currPx = currPt.price ?? currPt.close ?? 0;
+    const pct = prevPx > 0 ? ((currPx - prevPx) / prevPx) * 100 : 0;
+    monthPts.push({
+      label: formatMonthLabelEs(monthSlice[i].monthKey),
+      fullDate: currPt.date,
+      periodDesc: `Mes ${monthSlice[i].monthKey} (cierre ${currPt.date} vs ${prevPt.date})`,
+      prevClose: Number(prevPx.toFixed(2)),
+      close: Number(currPx.toFixed(2)),
+      changePct: Number(pct.toFixed(2)),
+      changeUsd: Number((currPx - prevPx).toFixed(2)),
+    });
+  }
+  return buildVariabilityStats('1M', `Últimos ${monthPts.length} meses (hasta 3 años)`, 'Cierre mensual (última sesión del mes)', monthPts);
 }
 
 export interface DivergenceAnalysisResult {
   hasEnoughData: boolean;
   windowSessions: number;
+  periodStartDate: string;
+  periodEndDate: string;
+  cycle1Range: string;
+  cycle2Range: string;
   degreePct: number;
   severity: 'Alta' | 'Moderada' | 'Baja / Nula';
   classification: string;
@@ -391,7 +621,9 @@ export interface DivergenceAnalysisResult {
     recentDate: string;
     priceDeltaPct: number;
     prevRsi: number;
+    prevRsiDate: string;
     recentRsi: number;
+    recentRsiDate: string;
     rsiDeltaPts: number;
     isDivergent: boolean;
   };
@@ -402,7 +634,9 @@ export interface DivergenceAnalysisResult {
     recentDate: string;
     priceDeltaPct: number;
     prevRsi: number;
+    prevRsiDate: string;
     recentRsi: number;
+    recentRsiDate: string;
     rsiDeltaPts: number;
     isDivergent: boolean;
   };
@@ -424,13 +658,17 @@ function computePriceRsiDivergence(rawPoints: PricePoint[]): DivergenceAnalysisR
     return {
       hasEnoughData: false,
       windowSessions: valid.length,
+      periodStartDate: valid[0]?.date || '-',
+      periodEndDate: valid[valid.length - 1]?.date || '-',
+      cycle1Range: '-',
+      cycle2Range: '-',
       degreePct: 0,
       severity: 'Baja / Nula',
       classification: 'Datos insuficientes para cruce de extremos',
       directionColor: '#94a3b8',
-      diagnosis: 'Se requieren al menos 12 sesiones con histórico de Precio y RSI (14) para contrastar máximos y mínimos entre dos ciclos.',
-      highs: { prevPrice: 0, prevDate: '-', recentPrice: 0, recentDate: '-', priceDeltaPct: 0, prevRsi: 0, recentRsi: 0, rsiDeltaPts: 0, isDivergent: false },
-      lows: { prevPrice: 0, prevDate: '-', recentPrice: 0, recentDate: '-', priceDeltaPct: 0, prevRsi: 0, recentRsi: 0, rsiDeltaPts: 0, isDivergent: false },
+      diagnosis: 'Se requieren al menos 12 sesiones diarias con histórico de Precio y RSI (14) para contrastar máximos y mínimos entre dos ciclos.',
+      highs: { prevPrice: 0, prevDate: '-', recentPrice: 0, recentDate: '-', priceDeltaPct: 0, prevRsi: 0, prevRsiDate: '-', recentRsi: 0, recentRsiDate: '-', rsiDeltaPts: 0, isDivergent: false },
+      lows: { prevPrice: 0, prevDate: '-', recentPrice: 0, recentDate: '-', priceDeltaPct: 0, prevRsi: 0, prevRsiDate: '-', recentRsi: 0, recentRsiDate: '-', rsiDeltaPts: 0, isDivergent: false },
     };
   }
 
@@ -462,7 +700,9 @@ function computePriceRsiDivergence(rawPoints: PricePoint[]): DivergenceAnalysisR
       minPrice: Number((minPricePt.low ?? minPricePt.price ?? minPricePt.close ?? 0).toFixed(2)),
       minPriceDate: minPricePt.date,
       maxRsi: Number((maxRsiPt.rsi ?? 50).toFixed(1)),
+      maxRsiDate: maxRsiPt.date,
       minRsi: Number((minRsiPt.rsi ?? 50).toFixed(1)),
+      minRsiDate: minRsiPt.date,
     };
   };
 
@@ -527,6 +767,10 @@ function computePriceRsiDivergence(rawPoints: PricePoint[]): DivergenceAnalysisR
   return {
     hasEnoughData: true,
     windowSessions: valid.length,
+    periodStartDate: valid[0].date,
+    periodEndDate: valid[valid.length - 1].date,
+    cycle1Range: `${firstHalf[0].date} → ${firstHalf[firstHalf.length - 1].date}`,
+    cycle2Range: `${secondHalf[0].date} → ${secondHalf[secondHalf.length - 1].date}`,
     degreePct,
     severity,
     classification,
@@ -539,7 +783,9 @@ function computePriceRsiDivergence(rawPoints: PricePoint[]): DivergenceAnalysisR
       recentDate: ext2.maxPriceDate,
       priceDeltaPct: priceHighDeltaPct,
       prevRsi: ext1.maxRsi,
+      prevRsiDate: ext1.maxRsiDate,
       recentRsi: ext2.maxRsi,
+      recentRsiDate: ext2.maxRsiDate,
       rsiDeltaPts: rsiHighDeltaPts,
       isDivergent: classicBearishHigh || hiddenBearishHigh,
     },
@@ -550,7 +796,9 @@ function computePriceRsiDivergence(rawPoints: PricePoint[]): DivergenceAnalysisR
       recentDate: ext2.minPriceDate,
       priceDeltaPct: priceLowDeltaPct,
       prevRsi: ext1.minRsi,
+      prevRsiDate: ext1.minRsiDate,
       recentRsi: ext2.minRsi,
+      recentRsiDate: ext2.minRsiDate,
       rsiDeltaPts: rsiLowDeltaPts,
       isDivergent: classicBullishLow || hiddenBullishLow,
     },
@@ -649,7 +897,8 @@ export const StockDetail: React.FC<StockDetailProps> = ({
   const [lastAlertEmailPreview, setLastAlertEmailPreview] = useState<PriceAlertEmailResult | null>(null);
   const [showEmailPreviewModal, setShowEmailPreviewModal] = useState(false);
   const [sendingTestEmail, setSendingTestEmail] = useState(false);
-  const [intraday4hPct, setIntraday4hPct] = useState<number | null>(null);
+  const [variabilityTimeframe, setVariabilityTimeframe] = useState<VariabilityTimeframe>('1D');
+  const [intradayBars4h, setIntradayBars4h] = useState<IntradayBar4h[]>([]);
 
   // Alertas específicas para este activo
   const activeAlertsForStock = useMemo(() => {
@@ -777,26 +1026,56 @@ export const StockDetail: React.FC<StockDetailProps> = ({
     setShowEmailPreviewModal(true);
   };
 
-  // Consultar barras horarias (1H) para obtener variación exacta de las últimas 4 Horas
+  // Consultar barras horarias (1H en últimos 60 días) y agruparlas en bloques de 4 horas (AM/PM horario NYSE)
   useEffect(() => {
     let isMounted = true;
-    setIntraday4hPct(null);
-    fetch(`/api/chart/${stock.ticker}?range=5d&interval=1h`)
+    setIntradayBars4h([]);
+    fetch(`/api/chart/${stock.ticker}?range=60d&interval=1h`)
       .then((res) => (res && res.ok && (res.headers.get('content-type') || '').includes('json') ? res.json() : null))
       .then((json) => {
         if (!isMounted || !json) return;
-        const closes: (number | null)[] = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
-        const valid = closes.filter((c): c is number => typeof c === 'number' && c > 0);
-        if (valid.length >= 5) {
-          const last = valid[valid.length - 1];
-          const prev4h = valid[valid.length - 5];
-          if (prev4h > 0) {
-            setIntraday4hPct(Number((((last - prev4h) / prev4h) * 100).toFixed(2)));
+        const result = json?.chart?.result?.[0];
+        const timestamps: number[] = result?.timestamp || [];
+        const closes: (number | null)[] = result?.indicators?.quote?.[0]?.close || [];
+        const fmt = new Intl.DateTimeFormat('sv-SE', {
+          timeZone: 'America/New_York',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        });
+
+        const blockOrder: string[] = [];
+        const blockMap = new Map<string, IntradayBar4h>();
+
+        for (let i = 0; i < timestamps.length; i++) {
+          const cl = closes[i];
+          if (typeof cl !== 'number' || !Number.isFinite(cl) || cl <= 0) continue;
+          const parts = fmt.format(new Date(timestamps[i] * 1000)).split(' ');
+          const datePart = parts[0] || '';
+          const hourNum = Number((parts[1] || '12').split(':')[0]);
+          if (!datePart || isNaN(hourNum)) continue;
+          const slot = hourNum < 13 ? 'AM' : 'PM';
+          const key = `${datePart}|${slot}`;
+          const bar: IntradayBar4h = {
+            label: `${datePart.slice(5)} ${slot}`,
+            fullDate: `${datePart} ${slot === 'AM' ? '12:30' : '16:00'} NY`,
+            close: Number(cl.toFixed(2)),
+          };
+          if (!blockMap.has(key)) {
+            blockOrder.push(key);
           }
+          blockMap.set(key, bar);
+        }
+
+        if (blockOrder.length >= 2) {
+          setIntradayBars4h(blockOrder.map((k) => blockMap.get(k)!));
         }
       })
       .catch(() => {
-        // Fallback intradía automático
+        // Fallback automático a bloques derivados de OHLC diario
       });
     return () => {
       isMounted = false;
@@ -1033,9 +1312,9 @@ export const StockDetail: React.FC<StockDetailProps> = ({
     return allQuarterlyData.slice(-count);
   }, [allQuarterlyData, timeframe]);
 
-  const variabilitySeries = useMemo(
-    () => computePriceVariabilitySeries(stock, rawPoints, intraday4hPct),
-    [stock, rawPoints, intraday4hPct]
+  const variabilityData = useMemo(
+    () => computeVariabilityTimeSeries(variabilityTimeframe, stock, rawPoints, intradayBars4h),
+    [variabilityTimeframe, stock, rawPoints, intradayBars4h]
   );
 
   const divergenceAnalysis = useMemo(
@@ -2181,7 +2460,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
 
         </div>
 
-      {/* Apartado de Análisis Técnico: Variabilidad de Precio (4H, 1D, 3D, 1S, 1M) & Divergencia Precio vs RSI */}
+      {/* Apartado de Análisis Técnico: Variabilidad de Precio (Serie Dinámica por Temporalidad) & Divergencia Precio vs RSI */}
       <div className="glass-panel" style={{ padding: '26px', marginBottom: '28px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -2191,7 +2470,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                 Análisis Técnico: Variabilidad de Precio &amp; Divergencia RSI (14)
               </h2>
               <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                Serie temporal de variaciones porcentuales (4H, 1D, 3D, 1S, 1M) y lectura de máximos/mínimos Precio vs. Oscilador RSI
+                Serie histórica de variaciones % del precio según temporalidad seleccionada (4H, 1D, 3D, 1S, 1M) y lectura de máximos/mínimos Precio vs. RSI (14)
               </span>
             </div>
           </div>
@@ -2224,28 +2503,50 @@ export const StockDetail: React.FC<StockDetailProps> = ({
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
-          {/* Sub-panel 1: Gráfico de Columnas de Variabilidad del Precio */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '20px' }}>
+          {/* Sub-panel 1: Serie Histórica de Variabilidad del Precio con Filtro de Temporalidad */}
           <div style={{
             background: 'var(--bg-surface)',
             border: '1px solid var(--border-subtle)',
             borderRadius: '12px',
             padding: '18px'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', gap: '10px', flexWrap: 'wrap' }}>
               <strong style={{ fontSize: '0.94rem', color: '#fff' }}>
-                Variabilidad del Precio (% Cambio por Horizonte)
+                Variabilidad del Precio ({variabilityTimeframe}) a lo largo del tiempo
               </strong>
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                4H • 1D • 3D • 1S • 1M
-              </span>
+              <div style={{ display: 'flex', gap: '4px', background: 'rgba(2, 6, 23, 0.55)', padding: '3px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                {(['4H', '1D', '3D', '1S', '1M'] as VariabilityTimeframe[]).map((tf) => (
+                  <button
+                    key={tf}
+                    type="button"
+                    className={`btn ${variabilityTimeframe === tf ? 'btn-active' : 'btn-secondary'}`}
+                    style={{ padding: '3px 9px', fontSize: '0.72rem', fontWeight: 700 }}
+                    onClick={() => setVariabilityTimeframe(tf)}
+                    title={`Ver serie de variabilidad porcentual en temporalidad ${tf}`}
+                  >
+                    {tf}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div style={{ width: '100%', height: '235px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '10px', gap: '8px', flexWrap: 'wrap' }}>
+              <span>{variabilityData.timelineLabel}</span>
+              <span style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>{variabilityData.sourceLabel}</span>
+            </div>
+
+            <div style={{ width: '100%', height: '240px' }}>
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={variabilitySeries} margin={{ top: 14, right: 12, left: -6, bottom: 4 }}>
+                <BarChart data={variabilityData.points} margin={{ top: 14, right: 10, left: -8, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                  <XAxis dataKey="shortLabel" stroke="var(--text-muted)" fontSize={11} tickLine={false} />
+                  <XAxis
+                    dataKey="label"
+                    stroke="var(--text-muted)"
+                    fontSize={10}
+                    tickLine={false}
+                    minTickGap={18}
+                  />
                   <YAxis
                     stroke="var(--text-muted)"
                     fontSize={11}
@@ -2256,22 +2557,23 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                   />
                   <ReferenceLine y={0} stroke="rgba(255,255,255,0.28)" />
                   <Tooltip
-                    contentStyle={{ background: 'rgba(15, 23, 42, 0.96)', border: '1px solid #1e293b', borderRadius: '10px', color: '#fff', fontSize: '0.8rem' }}
+                    contentStyle={{ background: 'rgba(15, 23, 42, 0.96)', border: '1px solid #1e293b', borderRadius: '10px', color: '#fff', fontSize: '0.78rem' }}
                     labelFormatter={(_label, payload) => {
-                      const p = payload?.[0]?.payload as VariabilityPoint | undefined;
-                      return p ? `${p.horizon} (${p.sourceNote})` : String(_label);
+                      const p = payload?.[0]?.payload as VariabilitySeriesPoint | undefined;
+                      if (!p) return String(_label);
+                      return `${p.periodDesc} • $${p.prevClose.toFixed(2)} → $${p.close.toFixed(2)}`;
                     }}
                     formatter={(value: any, _name: any, item: any) => {
                       const pct = Number(value);
-                      const p = item?.payload as VariabilityPoint | undefined;
+                      const p = item?.payload as VariabilitySeriesPoint | undefined;
                       const usdStr = p ? ` (${p.changeUsd >= 0 ? '+$' : '-$'}${Math.abs(p.changeUsd).toFixed(2)} USD)` : '';
-                      return [`${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%${usdStr}`, 'Variación del Precio'];
+                      return [`${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%${usdStr}`, `Variación ${variabilityTimeframe}`];
                     }}
                   />
-                  <Bar dataKey="changePct" name="% Variación" radius={[5, 5, 0, 0]} maxBarSize={46}>
-                    {variabilitySeries.map((pt, idx) => (
+                  <Bar dataKey="changePct" name={`% Variación (${variabilityTimeframe})`} radius={[3, 3, 0, 0]} maxBarSize={22}>
+                    {variabilityData.points.map((pt, idx) => (
                       <Cell
-                        key={`var-col-${idx}`}
+                        key={`var-col-${variabilityTimeframe}-${idx}`}
                         fill={pt.changePct >= 0 ? '#10b981' : '#ef4444'}
                         fillOpacity={0.9}
                       />
@@ -2281,40 +2583,62 @@ export const StockDetail: React.FC<StockDetailProps> = ({
               </ResponsiveContainer>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '8px', marginTop: '12px' }}>
-              {variabilitySeries.map(pt => (
-                <div
-                  key={pt.shortLabel}
-                  style={{
-                    background: 'rgba(255,255,255,0.025)',
-                    border: '1px solid rgba(255,255,255,0.06)',
-                    borderRadius: '8px',
-                    padding: '8px 6px',
-                    textAlign: 'center'
-                  }}
-                  title={`${pt.horizon}: ${pt.sourceNote}`}
-                >
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>{pt.horizon}</div>
-                  <div
-                    className="font-mono"
-                    style={{
-                      fontSize: '0.88rem',
-                      fontWeight: 800,
-                      marginTop: '3px',
-                      color: pt.changePct >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'
-                    }}
-                  >
-                    {pt.changePct >= 0 ? '+' : ''}{pt.changePct.toFixed(2)}%
-                  </div>
-                  <div className="font-mono" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                    {pt.changeUsd >= 0 ? '+$' : '-$'}{Math.abs(pt.changeUsd).toFixed(2)}
-                  </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px', marginTop: '12px' }}>
+              <div style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '8px 10px' }}>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>
+                  Último ({variabilityTimeframe}) • {variabilityData.lastPoint?.label || '-'}
                 </div>
-              ))}
+                <div
+                  className="font-mono"
+                  style={{
+                    fontSize: '0.9rem',
+                    fontWeight: 800,
+                    marginTop: '3px',
+                    color: (variabilityData.lastPoint?.changePct ?? 0) >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'
+                  }}
+                >
+                  {variabilityData.lastPoint ? `${variabilityData.lastPoint.changePct >= 0 ? '+' : ''}${variabilityData.lastPoint.changePct.toFixed(2)}%` : '-'}
+                </div>
+                <div className="font-mono" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>
+                  {variabilityData.lastPoint ? `${variabilityData.lastPoint.changeUsd >= 0 ? '+$' : '-$'}${Math.abs(variabilityData.lastPoint.changeUsd).toFixed(2)} USD` : '-'}
+                </div>
+              </div>
+
+              <div style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '8px 10px' }}>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>Volatilidad Media</div>
+                <div className="font-mono" style={{ fontSize: '0.9rem', fontWeight: 800, marginTop: '3px', color: 'var(--accent-cyan)' }}>
+                  ±{variabilityData.avgAbsPct.toFixed(2)}%
+                </div>
+                <div className="font-mono" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>
+                  σ = {variabilityData.stdDevPct.toFixed(2)}%
+                </div>
+              </div>
+
+              <div style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '8px 10px' }}>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>Extremos ({variabilityTimeframe})</div>
+                <div className="font-mono" style={{ fontSize: '0.78rem', fontWeight: 800, marginTop: '3px', color: 'var(--accent-green)' }}>
+                  {variabilityData.maxGain ? `+${variabilityData.maxGain.changePct.toFixed(1)}% (${variabilityData.maxGain.label})` : '-'}
+                </div>
+                <div className="font-mono" style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--accent-red)' }}>
+                  {variabilityData.maxDrop ? `${variabilityData.maxDrop.changePct.toFixed(1)}% (${variabilityData.maxDrop.label})` : '-'}
+                </div>
+              </div>
+
+              <div style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '8px 10px' }}>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>Períodos Alcistas</div>
+                <div className="font-mono" style={{ fontSize: '0.9rem', fontWeight: 800, marginTop: '3px', color: '#fff' }}>
+                  {variabilityData.positiveCount} / {variabilityData.points.length}
+                </div>
+                <div className="font-mono" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>
+                  {variabilityData.points.length > 0
+                    ? `${Math.round((variabilityData.positiveCount / variabilityData.points.length) * 100)}% positivos`
+                    : 'Sin datos'}
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Sub-panel 2: Grado de Divergencia Precio (Máximos/Mínimos) vs RSI */}
+          {/* Sub-panel 2: Grado de Divergencia Precio (Máximos/Mínimos) vs RSI con Fechas Exactas */}
           <div style={{
             background: 'var(--bg-surface)',
             border: '1px solid var(--border-subtle)',
@@ -2326,11 +2650,11 @@ export const StockDetail: React.FC<StockDetailProps> = ({
             gap: '14px'
           }}>
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <GitCompare size={18} color={divergenceAnalysis.directionColor} />
                   <strong style={{ fontSize: '0.94rem', color: '#fff' }}>
-                    Divergencia Precio vs. RSI ({divergenceAnalysis.windowSessions} sesiones)
+                    Divergencia Precio vs. RSI ({divergenceAnalysis.windowSessions} sesiones diarias)
                   </strong>
                 </div>
                 <span style={{
@@ -2343,6 +2667,10 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                 }}>
                   Severidad: {divergenceAnalysis.severity}
                 </span>
+              </div>
+
+              <div style={{ fontSize: '0.71rem', color: 'var(--text-muted)', marginBottom: '12px', lineHeight: 1.45 }}>
+                Temporalidad: <strong style={{ color: 'var(--text-secondary)' }}>Diaria (1D)</strong> · RSI(14) Wilder · Ventana: <strong style={{ color: 'var(--text-secondary)' }}>{divergenceAnalysis.periodStartDate} → {divergenceAnalysis.periodEndDate}</strong> (Ciclo 1 vs Ciclo 2: ~{Math.floor(divergenceAnalysis.windowSessions / 2)} sesiones c/u)
               </div>
 
               {/* Indicador Cuantitativo de Grado de Divergencia (0% - 100%) */}
@@ -2375,16 +2703,16 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                 </div>
               </div>
 
-              {/* Comparativa de Máximos y Mínimos: Precio vs RSI */}
+              {/* Comparativa de Máximos y Mínimos: Precio vs RSI con fechas exactas */}
               {divergenceAnalysis.hasEnoughData ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px' }}>
                   {/* Máximos */}
                   <div style={{
                     background: divergenceAnalysis.highs.isDivergent ? 'rgba(239, 68, 68, 0.08)' : 'rgba(255,255,255,0.025)',
                     border: divergenceAnalysis.highs.isDivergent ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid rgba(255,255,255,0.07)',
                     borderRadius: '8px',
                     padding: '10px 12px',
-                    fontSize: '0.76rem'
+                    fontSize: '0.75rem'
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
                       <strong style={{ color: '#fff' }}>Máximos (Highs)</strong>
@@ -2392,9 +2720,25 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                         {divergenceAnalysis.highs.isDivergent ? 'Divergente' : 'Confirmado'}
                       </span>
                     </div>
-                    <div style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                      <div>Precio: <strong className="font-mono" style={{ color: '#fff' }}>${divergenceAnalysis.highs.prevPrice.toFixed(2)}</strong> → <strong className="font-mono" style={{ color: '#fff' }}>${divergenceAnalysis.highs.recentPrice.toFixed(2)}</strong> ({divergenceAnalysis.highs.priceDeltaPct >= 0 ? '+' : ''}{divergenceAnalysis.highs.priceDeltaPct.toFixed(1)}%)</div>
-                      <div>RSI: <strong className="font-mono" style={{ color: '#38bdf8' }}>{divergenceAnalysis.highs.prevRsi.toFixed(1)}</strong> → <strong className="font-mono" style={{ color: '#38bdf8' }}>{divergenceAnalysis.highs.recentRsi.toFixed(1)}</strong> ({divergenceAnalysis.highs.rsiDeltaPts >= 0 ? '+' : ''}{divergenceAnalysis.highs.rsiDeltaPts.toFixed(1)} pts)</div>
+                    <div style={{ color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                      <div>
+                        Precio: <strong className="font-mono" style={{ color: '#fff' }}>${divergenceAnalysis.highs.prevPrice.toFixed(2)}</strong>{' '}
+                        <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)' }}>({divergenceAnalysis.highs.prevDate})</span> →{' '}
+                        <strong className="font-mono" style={{ color: '#fff' }}>${divergenceAnalysis.highs.recentPrice.toFixed(2)}</strong>{' '}
+                        <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)' }}>({divergenceAnalysis.highs.recentDate})</span>{' '}
+                        <span className="font-mono" style={{ color: divergenceAnalysis.highs.priceDeltaPct >= 0 ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 700 }}>
+                          ({divergenceAnalysis.highs.priceDeltaPct >= 0 ? '+' : ''}{divergenceAnalysis.highs.priceDeltaPct.toFixed(1)}%)
+                        </span>
+                      </div>
+                      <div style={{ marginTop: '4px' }}>
+                        RSI (14): <strong className="font-mono" style={{ color: '#38bdf8' }}>{divergenceAnalysis.highs.prevRsi.toFixed(1)}</strong>{' '}
+                        <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)' }}>({divergenceAnalysis.highs.prevRsiDate})</span> →{' '}
+                        <strong className="font-mono" style={{ color: '#38bdf8' }}>{divergenceAnalysis.highs.recentRsi.toFixed(1)}</strong>{' '}
+                        <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)' }}>({divergenceAnalysis.highs.recentRsiDate})</span>{' '}
+                        <span className="font-mono" style={{ color: '#38bdf8', fontWeight: 700 }}>
+                          ({divergenceAnalysis.highs.rsiDeltaPts >= 0 ? '+' : ''}{divergenceAnalysis.highs.rsiDeltaPts.toFixed(1)} pts)
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -2404,7 +2748,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                     border: divergenceAnalysis.lows.isDivergent ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid rgba(255,255,255,0.07)',
                     borderRadius: '8px',
                     padding: '10px 12px',
-                    fontSize: '0.76rem'
+                    fontSize: '0.75rem'
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
                       <strong style={{ color: '#fff' }}>Mínimos (Lows)</strong>
@@ -2412,15 +2756,31 @@ export const StockDetail: React.FC<StockDetailProps> = ({
                         {divergenceAnalysis.lows.isDivergent ? 'Divergente' : 'Confirmado'}
                       </span>
                     </div>
-                    <div style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                      <div>Precio: <strong className="font-mono" style={{ color: '#fff' }}>${divergenceAnalysis.lows.prevPrice.toFixed(2)}</strong> → <strong className="font-mono" style={{ color: '#fff' }}>${divergenceAnalysis.lows.recentPrice.toFixed(2)}</strong> ({divergenceAnalysis.lows.priceDeltaPct >= 0 ? '+' : ''}{divergenceAnalysis.lows.priceDeltaPct.toFixed(1)}%)</div>
-                      <div>RSI: <strong className="font-mono" style={{ color: '#38bdf8' }}>{divergenceAnalysis.lows.prevRsi.toFixed(1)}</strong> → <strong className="font-mono" style={{ color: '#38bdf8' }}>{divergenceAnalysis.lows.recentRsi.toFixed(1)}</strong> ({divergenceAnalysis.lows.rsiDeltaPts >= 0 ? '+' : ''}{divergenceAnalysis.lows.rsiDeltaPts.toFixed(1)} pts)</div>
+                    <div style={{ color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                      <div>
+                        Precio: <strong className="font-mono" style={{ color: '#fff' }}>${divergenceAnalysis.lows.prevPrice.toFixed(2)}</strong>{' '}
+                        <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)' }}>({divergenceAnalysis.lows.prevDate})</span> →{' '}
+                        <strong className="font-mono" style={{ color: '#fff' }}>${divergenceAnalysis.lows.recentPrice.toFixed(2)}</strong>{' '}
+                        <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)' }}>({divergenceAnalysis.lows.recentDate})</span>{' '}
+                        <span className="font-mono" style={{ color: divergenceAnalysis.lows.priceDeltaPct >= 0 ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 700 }}>
+                          ({divergenceAnalysis.lows.priceDeltaPct >= 0 ? '+' : ''}{divergenceAnalysis.lows.priceDeltaPct.toFixed(1)}%)
+                        </span>
+                      </div>
+                      <div style={{ marginTop: '4px' }}>
+                        RSI (14): <strong className="font-mono" style={{ color: '#38bdf8' }}>{divergenceAnalysis.lows.prevRsi.toFixed(1)}</strong>{' '}
+                        <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)' }}>({divergenceAnalysis.lows.prevRsiDate})</span> →{' '}
+                        <strong className="font-mono" style={{ color: '#38bdf8' }}>{divergenceAnalysis.lows.recentRsi.toFixed(1)}</strong>{' '}
+                        <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)' }}>({divergenceAnalysis.lows.recentRsiDate})</span>{' '}
+                        <span className="font-mono" style={{ color: '#38bdf8', fontWeight: 700 }}>
+                          ({divergenceAnalysis.lows.rsiDeltaPts >= 0 ? '+' : ''}{divergenceAnalysis.lows.rsiDeltaPts.toFixed(1)} pts)
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
               ) : (
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                  Cargando suficientes sesiones históricas (mínimo 24 sesiones) para comparar máximos y mínimos frente al RSI (14).
+                  Cargando suficientes sesiones históricas (mínimo 12 sesiones diarias) para comparar máximos y mínimos frente al RSI (14).
                 </div>
               )}
             </div>

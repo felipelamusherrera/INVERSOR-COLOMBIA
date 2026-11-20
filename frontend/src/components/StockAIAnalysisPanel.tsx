@@ -39,6 +39,13 @@ import {
 import { toast } from 'sonner';
 import type { StockRecord } from '../types/stock';
 import { formatCurrencyUSD, formatPercentage, calculateRealSMA, calculateNextEarningsDate } from '../utils/formatters';
+import {
+  loadRiskSimConfig,
+  saveRiskSimConfig,
+  calculatePositionSimulation,
+  RISK_SIM_UPDATED_EVENT,
+  type RiskSimConfig
+} from '../utils/riskSimulator';
 import { AddPositionModal } from './AddPositionModal';
 import { AddToWatchlistModal } from './AddToWatchlistModal';
 import { 
@@ -95,6 +102,35 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showAddPositionModal, setShowAddPositionModal] = useState(false);
   const [showAddToWatchlistModal, setShowAddToWatchlistModal] = useState(false);
+
+  // Simulador interactivo de capital y riesgo (compartido entre secciones 11 y Estrategia IA)
+  const [riskSim, setRiskSim] = useState<RiskSimConfig>(() => loadRiskSimConfig());
+  const [capitalDraft, setCapitalDraft] = useState<string>(() => String(loadRiskSimConfig().capital));
+  const [riskDraft, setRiskDraft] = useState<string>(() => String(loadRiskSimConfig().riskPct));
+
+  useEffect(() => {
+    const onExternalUpdate = (e: Event) => {
+      const detail = (e as CustomEvent<RiskSimConfig>).detail;
+      if (detail) {
+        setRiskSim(detail);
+        setCapitalDraft(String(detail.capital));
+        setRiskDraft(String(detail.riskPct));
+      }
+    };
+    window.addEventListener(RISK_SIM_UPDATED_EVENT, onExternalUpdate);
+    return () => window.removeEventListener(RISK_SIM_UPDATED_EVENT, onExternalUpdate);
+  }, []);
+
+  const updateRiskSim = (partial: Partial<RiskSimConfig>) => {
+    const next: RiskSimConfig = {
+      ...riskSim,
+      ...partial,
+    };
+    setRiskSim(next);
+    if (partial.capital !== undefined) setCapitalDraft(String(next.capital));
+    if (partial.riskPct !== undefined) setRiskDraft(String(next.riskPct));
+    saveRiskSimConfig(next);
+  };
 
   // Mapear ETF Sectorial correspondiente
   const sectorEtf = useMemo(() => {
@@ -440,6 +476,47 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
     };
   }, [stock, asyncOfficialFinancials]);
 
+  const simResult = useMemo(
+    () =>
+      calculatePositionSimulation({
+        ...riskSim,
+        entryPrice: financialData.price,
+        stopLossPrice: financialData.stopLoss,
+        target1Price: financialData.target1,
+        target2Price: financialData.target2,
+      }),
+    [riskSim, financialData.price, financialData.stopLoss, financialData.target1, financialData.target2]
+  );
+
+  const dynamicTiers = useMemo(() => {
+    const cap = riskSim.capital;
+    const px = financialData.price > 0 ? financialData.price : 1;
+    const tier1Usd = Number((cap * 0.01).toFixed(2));
+    const tier2Usd = Number((cap * 0.02).toFixed(2));
+    const tier3Usd = Number((cap * 0.03).toFixed(2));
+    const recommendedPct =
+      (stock.profit_m || 0) > 15 && (stock.rel_volume || 1) >= 1.1
+        ? 3
+        : (stock.profit_m || 0) > 8
+        ? 2
+        : 1;
+    const recommendedLabel =
+      recommendedPct === 3 ? 'Alta Convicción' : recommendedPct === 2 ? 'Convicción Media' : 'Táctica Soporte';
+    const recommendedUsd = Number((cap * (recommendedPct / 100)).toFixed(2));
+
+    return {
+      tier1Usd,
+      tier1Shares: Number((tier1Usd / px).toFixed(3)),
+      tier2Usd,
+      tier2Shares: Number((tier2Usd / px).toFixed(3)),
+      tier3Usd,
+      tier3Shares: Number((tier3Usd / px).toFixed(3)),
+      recommendedPct,
+      recommendedLabel,
+      recommendedUsd,
+    };
+  }, [riskSim.capital, financialData.price, stock.profit_m, stock.rel_volume]);
+
   // Datos para gráficos comparativos
   const peChartData = useMemo(() => {
     const data: { name: string; val: number; isCurrent: boolean; isSector?: boolean; label: string }[] = [
@@ -490,7 +567,8 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
 
   const handleCopySheetsRow = () => {
     const today = new Date().toISOString().slice(0, 10);
-    const row = `${today}\t${stock.ticker}\t${stock.company}\t${financialData.price}\t${financialData.stopLoss}\t${financialData.target1}\t${financialData.target2}\t${financialData.rrT1}\t${financialData.convictionTier}\tNo`;
+    const tierSummary = `$${dynamicTiers.recommendedUsd.toFixed(2)} USD (${dynamicTiers.recommendedPct}% de $${riskSim.capital.toFixed(0)} · ${dynamicTiers.recommendedLabel})`;
+    const row = `${today}\t${stock.ticker}\t${stock.company}\t${financialData.price}\t${financialData.stopLoss}\t${financialData.target1}\t${financialData.target2}\t${financialData.rrT1}\t${tierSummary}\tNo`;
     navigator.clipboard.writeText(row);
     toast.success(`Fila de ${stock.ticker} copiada al portapapeles para Google Sheets`);
   };
@@ -1593,36 +1671,226 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
               </p>
             </div>
 
-            {/* Tarjetas Operativas de Asignación */}
+            {/* Simulador Interactivo de Estructura Operativa según Capital Propio (Paso 4) */}
+            <div style={{
+              background: 'rgba(15, 23, 42, 0.72)',
+              border: '1px solid rgba(6, 182, 212, 0.32)',
+              borderRadius: '12px',
+              padding: '16px 18px',
+              marginBottom: '16px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-cyan)', fontWeight: 800, fontSize: '0.92rem' }}>
+                    <Target size={16} /> Simulador Operativo según Tu Capital (Paso 4)
+                  </div>
+                  <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    Ajusta tu capital total y % de riesgo para calcular tamaño de posición, pérdida en Stop Loss y ganancia en Targets.
+                  </div>
+                </div>
+
+                {/* Selector de Modo de Dimensionamiento */}
+                <div style={{ display: 'flex', gap: '4px', background: '#070b14', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                  <button
+                    type="button"
+                    className={`btn ${riskSim.sizingMode === 'stop_risk' ? 'btn-active' : 'btn-secondary'}`}
+                    style={{ padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700 }}
+                    onClick={() => updateRiskSim({ sizingMode: 'stop_risk' })}
+                    title="Dimensiona acciones para que la pérdida en Stop Loss equivalga al % de riesgo elegido"
+                  >
+                    Riesgo en Stop Loss
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${riskSim.sizingMode === 'capital_alloc' ? 'btn-active' : 'btn-secondary'}`}
+                    style={{ padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700 }}
+                    onClick={() => updateRiskSim({ sizingMode: 'capital_alloc' })}
+                    title="Asigna exactamente ese % de tu capital total a esta operación"
+                  >
+                    % de Capital Invertido
+                  </button>
+                </div>
+              </div>
+
+              {/* Controles de Capital y % de Riesgo */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px', marginBottom: '16px' }}>
+                <div style={{ background: '#070b14', borderRadius: '9px', border: '1px solid var(--border-subtle)', padding: '10px 12px' }}>
+                  <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '6px' }}>
+                    Tu Capital Total (USD)
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <input
+                      type="number"
+                      min={10}
+                      step={100}
+                      value={capitalDraft}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setCapitalDraft(raw);
+                        const num = Number(raw);
+                        if (Number.isFinite(num) && num >= 10) {
+                          updateRiskSim({ capital: Number(num.toFixed(2)) });
+                        }
+                      }}
+                      onBlur={() => setCapitalDraft(String(riskSim.capital))}
+                      className="font-mono"
+                      style={{
+                        width: '115px',
+                        padding: '6px 10px',
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border-medium)',
+                        borderRadius: '6px',
+                        color: '#fff',
+                        fontSize: '0.88rem',
+                        fontWeight: 800,
+                        outline: 'none'
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                      {[1500, 5000, 10000, 25000].map(preset => (
+                        <button
+                          key={preset}
+                          type="button"
+                          className={`btn ${riskSim.capital === preset ? 'btn-active' : 'btn-secondary'}`}
+                          style={{ padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700 }}
+                          onClick={() => updateRiskSim({ capital: preset })}
+                        >
+                          ${preset.toLocaleString('en-US')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ background: '#070b14', borderRadius: '9px', border: '1px solid var(--border-subtle)', padding: '10px 12px' }}>
+                  <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '6px' }}>
+                    {riskSim.sizingMode === 'stop_risk' ? '% de Capital en Riesgo (hasta Stop Loss)' : '% de Capital Asignado a la Posición'}
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <input
+                      type="number"
+                      min={0.1}
+                      max={100}
+                      step={0.5}
+                      value={riskDraft}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setRiskDraft(raw);
+                        const num = Number(raw);
+                        if (Number.isFinite(num) && num >= 0.1 && num <= 100) {
+                          updateRiskSim({ riskPct: Number(num.toFixed(2)) });
+                        }
+                      }}
+                      onBlur={() => setRiskDraft(String(riskSim.riskPct))}
+                      className="font-mono"
+                      style={{
+                        width: '86px',
+                        padding: '6px 10px',
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border-medium)',
+                        borderRadius: '6px',
+                        color: '#fff',
+                        fontSize: '0.88rem',
+                        fontWeight: 800,
+                        outline: 'none'
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                      {[1, 2, 3, 5].map(pct => (
+                        <button
+                          key={pct}
+                          type="button"
+                          className={`btn ${riskSim.riskPct === pct ? 'btn-active' : 'btn-secondary'}`}
+                          style={{ padding: '3px 8px', fontSize: '0.68rem', fontWeight: 700 }}
+                          onClick={() => updateRiskSim({ riskPct: pct })}
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Resultados P&L de la Simulación */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px' }}>
+                <div style={{ background: '#070b14', padding: '12px 14px', borderRadius: '8px', border: '1px solid rgba(6, 182, 212, 0.3)' }}>
+                  <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)', fontWeight: 700 }}>Posición Simulada</div>
+                  <div className="font-mono" style={{ fontSize: '1.15rem', fontWeight: 900, color: '#fff', marginTop: '2px' }}>
+                    ${simResult.positionUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                  </div>
+                  <div className="font-mono" style={{ fontSize: '0.72rem', color: 'var(--accent-cyan)', marginTop: '2px' }}>
+                    {simResult.shares} acc ({simResult.positionCapPct.toFixed(1)}% del capital)
+                  </div>
+                  {simResult.cappedByCapital && (
+                    <div style={{ fontSize: '0.66rem', color: '#f59e0b', fontWeight: 700, marginTop: '3px' }}>
+                      Topeado al 100% de capital sin apalancamiento
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ background: '#070b14', padding: '12px 14px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.35)' }}>
+                  <div style={{ fontSize: '0.70rem', color: 'var(--accent-red)', fontWeight: 700 }}>Pérdida en Stop Loss (${financialData.stopLoss})</div>
+                  <div className="font-mono" style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--accent-red)', marginTop: '2px' }}>
+                    -${simResult.riskAtStopUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                  </div>
+                  <div className="font-mono" style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    -{simResult.riskAtStopCapPct.toFixed(2)}% de tu capital
+                  </div>
+                </div>
+
+                <div style={{ background: '#070b14', padding: '12px 14px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.35)' }}>
+                  <div style={{ fontSize: '0.70rem', color: 'var(--accent-green)', fontWeight: 700 }}>Ganancia Target 1 (${financialData.target1})</div>
+                  <div className="font-mono" style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--accent-green)', marginTop: '2px' }}>
+                    +${simResult.gainT1Usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                  </div>
+                  <div className="font-mono" style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    +{simResult.gainT1CapPct.toFixed(2)}% cap. · R:R {simResult.rrT1}:1
+                  </div>
+                </div>
+
+                <div style={{ background: '#070b14', padding: '12px 14px', borderRadius: '8px', border: '1px solid rgba(6, 182, 212, 0.35)' }}>
+                  <div style={{ fontSize: '0.70rem', color: 'var(--accent-cyan)', fontWeight: 700 }}>Ganancia Target 2 (${financialData.target2})</div>
+                  <div className="font-mono" style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--accent-cyan)', marginTop: '2px' }}>
+                    +${simResult.gainT2Usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                  </div>
+                  <div className="font-mono" style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    +{simResult.gainT2CapPct.toFixed(2)}% cap. · 50/50: +${simResult.gainTrailing5050Usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Tarjetas Operativas de Asignación Escalonadas a Tu Capital */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
               <div style={{ background: '#070b14', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)' }}>Tramo Recomendado</div>
+                <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)' }}>Tramo Recomendado ({dynamicTiers.recommendedPct}%)</div>
                 <div className="font-mono" style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--accent-green)' }}>
-                  {financialData.convictionTier.split(' ')[0]} USD
+                  ${dynamicTiers.recommendedUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
                 </div>
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>Cuenta base $1,500 USD</div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>Base ${riskSim.capital.toLocaleString('en-US')} USD · {dynamicTiers.recommendedLabel}</div>
               </div>
 
               <div style={{ background: '#070b14', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)' }}>1% ($15 USD)</div>
+                <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)' }}>1% (${dynamicTiers.tier1Usd.toLocaleString('en-US', { maximumFractionDigits: 2 })} USD)</div>
                 <div className="font-mono" style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff' }}>
-                  {financialData.sh15} acc
+                  {dynamicTiers.tier1Shares} acc
                 </div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>Táctica en soporte</div>
               </div>
 
               <div style={{ background: '#070b14', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)' }}>2% ($30 USD)</div>
+                <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)' }}>2% (${dynamicTiers.tier2Usd.toLocaleString('en-US', { maximumFractionDigits: 2 })} USD)</div>
                 <div className="font-mono" style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff' }}>
-                  {financialData.sh30} acc
+                  {dynamicTiers.tier2Shares} acc
                 </div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>Convicción media</div>
               </div>
 
               <div style={{ background: '#070b14', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)' }}>3% ($45 USD)</div>
+                <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)' }}>3% (${dynamicTiers.tier3Usd.toLocaleString('en-US', { maximumFractionDigits: 2 })} USD)</div>
                 <div className="font-mono" style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-cyan)' }}>
-                  {financialData.sh45} acc
+                  {dynamicTiers.tier3Shares} acc
                 </div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>Máxima convicción</div>
               </div>
@@ -1777,24 +2045,24 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.8rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Tramo Sugerido:</span>
-                  <span className="font-mono" style={{ fontWeight: 800, color: 'var(--accent-green)' }}>{financialData.convictionTier.split(' ')[0]} USD</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Tramo Sugerido ({dynamicTiers.recommendedPct}%):</span>
+                  <span className="font-mono" style={{ fontWeight: 800, color: 'var(--accent-green)' }}>${dynamicTiers.recommendedUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>1% ($15 USD):</span>
-                  <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{financialData.sh15} acc</span>
+                  <span style={{ color: 'var(--text-muted)' }}>1% (${dynamicTiers.tier1Usd.toLocaleString('en-US', { maximumFractionDigits: 2 })} USD):</span>
+                  <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{dynamicTiers.tier1Shares} acc</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>2% ($30 USD):</span>
-                  <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{financialData.sh30} acc</span>
+                  <span style={{ color: 'var(--text-muted)' }}>2% (${dynamicTiers.tier2Usd.toLocaleString('en-US', { maximumFractionDigits: 2 })} USD):</span>
+                  <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{dynamicTiers.tier2Shares} acc</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>3% ($45 USD):</span>
-                  <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{financialData.sh45} acc</span>
+                  <span style={{ color: 'var(--text-muted)' }}>3% (${dynamicTiers.tier3Usd.toLocaleString('en-US', { maximumFractionDigits: 2 })} USD):</span>
+                  <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{dynamicTiers.tier3Shares} acc</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Trailing Stop:</span>
-                  <span style={{ color: 'var(--accent-cyan)', fontWeight: 700 }}>Breakeven en T1</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Capital Simulado:</span>
+                  <span className="font-mono" style={{ color: 'var(--accent-cyan)', fontWeight: 700 }}>${riskSim.capital.toLocaleString('en-US')} USD ({riskSim.riskPct}%)</span>
                 </div>
               </div>
             </div>
@@ -1812,35 +2080,88 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
               <h3 style={{ fontSize: '1rem', fontWeight: 800, color: '#fff', margin: 0 }}>
                 Estructura Operativa Calibrada (Riesgo Medio–Alto)
               </h3>
-              <div style={{ display: 'flex', gap: '12px', fontSize: '0.80rem' }}>
+              <div style={{ display: 'flex', gap: '12px', fontSize: '0.80rem', flexWrap: 'wrap' }}>
                 <span style={{ color: 'var(--accent-cyan)' }}>Ratio R:R a T1: <strong>{financialData.rrT1} : 1</strong></span>
                 <span style={{ color: 'var(--accent-green)' }}>Ratio R:R a T2: <strong>{financialData.rrT2} : 1</strong></span>
               </div>
+            </div>
+
+            {/* Controles rápidos sincronizados en Tablero Táctico */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', padding: '10px 12px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: '8px', border: '1px solid var(--border-subtle)', marginBottom: '14px', fontSize: '0.76rem' }}>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>Capital (USD):</span>
+              <input
+                type="number"
+                min={10}
+                step={100}
+                value={capitalDraft}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setCapitalDraft(raw);
+                  const num = Number(raw);
+                  if (Number.isFinite(num) && num >= 10) updateRiskSim({ capital: Number(num.toFixed(2)) });
+                }}
+                onBlur={() => setCapitalDraft(String(riskSim.capital))}
+                className="font-mono"
+                style={{ width: '95px', padding: '4px 8px', background: '#070b14', border: '1px solid var(--border-medium)', borderRadius: '6px', color: '#fff', fontWeight: 700 }}
+              />
+              <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>Riesgo (%):</span>
+              <input
+                type="number"
+                min={0.1}
+                max={100}
+                step={0.5}
+                value={riskDraft}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setRiskDraft(raw);
+                  const num = Number(raw);
+                  if (Number.isFinite(num) && num >= 0.1 && num <= 100) updateRiskSim({ riskPct: Number(num.toFixed(2)) });
+                }}
+                onBlur={() => setRiskDraft(String(riskSim.riskPct))}
+                className="font-mono"
+                style={{ width: '70px', padding: '4px 8px', background: '#070b14', border: '1px solid var(--border-medium)', borderRadius: '6px', color: '#fff', fontWeight: 700 }}
+              />
+              <select
+                value={riskSim.sizingMode}
+                onChange={(e) => updateRiskSim({ sizingMode: e.target.value as 'stop_risk' | 'capital_alloc' })}
+                style={{ background: '#070b14', color: '#fff', border: '1px solid var(--border-medium)', borderRadius: '6px', padding: '4px 8px', fontSize: '0.74rem' }}
+              >
+                <option value="stop_risk">Riesgo en Stop Loss</option>
+                <option value="capital_alloc">% Capital Invertido</option>
+              </select>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
               <div style={{ background: '#070b14', padding: '14px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
                 <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Precio Entrada</div>
                 <div className="font-mono" style={{ fontSize: '1.4rem', fontWeight: 900, color: '#fff' }}>${financialData.price.toFixed(2)}</div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Soporte confirmado</div>
+                <div className="font-mono" style={{ fontSize: '0.72rem', color: 'var(--accent-cyan)', fontWeight: 700 }}>
+                  Posición: ${simResult.positionUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })} ({simResult.shares} acc)
+                </div>
               </div>
 
               <div style={{ background: '#070b14', padding: '14px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
                 <div style={{ fontSize: '0.72rem', color: 'var(--accent-red)', textTransform: 'uppercase' }}>Stop Loss (-4.8%)</div>
                 <div className="font-mono" style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--accent-red)' }}>${financialData.stopLoss}</div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Invalidación técnica</div>
+                <div className="font-mono" style={{ fontSize: '0.72rem', color: 'var(--accent-red)', fontWeight: 700 }}>
+                  Pérdida est.: -${simResult.riskAtStopUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })} (-{simResult.riskAtStopCapPct.toFixed(2)}%)
+                </div>
               </div>
 
               <div style={{ background: '#070b14', padding: '14px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
                 <div style={{ fontSize: '0.72rem', color: 'var(--accent-green)', textTransform: 'uppercase' }}>Target 1 (+9.5%)</div>
                 <div className="font-mono" style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--accent-green)' }}>${financialData.target1}</div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--accent-cyan)', fontWeight: 700 }}>Trigger Trailing Breakeven</div>
+                <div className="font-mono" style={{ fontSize: '0.72rem', color: 'var(--accent-green)', fontWeight: 700 }}>
+                  Ganancia T1: +${simResult.gainT1Usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} (+{simResult.gainT1CapPct.toFixed(2)}%)
+                </div>
               </div>
 
               <div style={{ background: '#070b14', padding: '14px', borderRadius: '8px', border: '1px solid rgba(6, 182, 212, 0.3)' }}>
                 <div style={{ fontSize: '0.72rem', color: 'var(--accent-cyan)', textTransform: 'uppercase' }}>Target 2 (+22.0%)</div>
                 <div className="font-mono" style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>${financialData.target2}</div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Expansión hacia Intrínseco</div>
+                <div className="font-mono" style={{ fontSize: '0.72rem', color: 'var(--accent-cyan)', fontWeight: 700 }}>
+                  Ganancia T2: +${simResult.gainT2Usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} (+{simResult.gainT2CapPct.toFixed(2)}%)
+                </div>
               </div>
             </div>
           </div>
