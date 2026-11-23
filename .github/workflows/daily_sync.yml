@@ -1,19 +1,14 @@
 name: Daily Finviz Sync to Supabase
 
 on:
-  schedule:
-    # Actualización automática cada 2 horas durante jornada de mercado abierto (Wall Street, Lunes a Viernes)
-    # 1. Apertura / Primera sesión: 9:30 AM Colombia (14:30 UTC)
-    - cron: '30 14 * * 1-5'
-    # 2. Media mañana: 11:30 AM Colombia (16:30 UTC)
-    - cron: '30 16 * * 1-5'
-    # 3. Tarde bursátil: 1:30 PM Colombia (18:30 UTC)
-    - cron: '30 18 * * 1-5'
-    # 4. Cierre horario verano (EDT) / Pre-cierre (EST): 3:30 PM Colombia (20:30 UTC)
-    - cron: '30 20 * * 1-5'
-    # 5. Cierre de jornada Wall Street (horario estándar EST): 4:15 PM Colombia (21:15 UTC)
-    - cron: '15 21 * * 1-5'
-  workflow_dispatch: # Permite ejecutarlo manualmente desde GitHub si se desea
+  # Disparado automáticamente con puntualidad exacta desde Supabase pg_cron + pg_net (workflow_dispatch)
+  # Horarios Lunes a Viernes (Hora Colombia UTC-5):
+  #   - 09:30 AM COL (14:30 UTC) · Apertura Wall Street
+  #   - 11:30 AM COL (16:30 UTC) · Media mañana
+  #   - 01:30 PM COL (18:30 UTC) · Tarde bursátil
+  #   - 03:30 PM COL (20:30 UTC) · Cierre EDT / Pre-cierre EST
+  #   - 04:15 PM COL (21:15 UTC) · Cierre oficial Wall Street EST
+  workflow_dispatch:
 
 jobs:
   sync:
