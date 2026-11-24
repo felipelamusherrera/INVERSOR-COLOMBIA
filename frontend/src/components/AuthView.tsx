@@ -516,7 +516,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
               </div>
 
               {/* Fila Dual: Tipo y Número de Documento */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '12px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.80rem', color: 'var(--text-secondary)', marginBottom: '5px', fontWeight: 600 }}>
                     Tipo Doc.

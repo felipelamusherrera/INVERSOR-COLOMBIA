@@ -211,7 +211,7 @@ export const UserAdminModule: React.FC = () => {
   };
 
   return (
-    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '24px' }} className="animate-fade-in">
+    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: 'var(--page-py, 20px) var(--page-px, 16px)' }} className="animate-fade-in">
       
       {/* 1. Encabezado del Módulo de Administración */}
       <div style={{
@@ -220,34 +220,35 @@ export const UserAdminModule: React.FC = () => {
         justifyContent: 'space-between',
         flexWrap: 'wrap',
         gap: '16px',
-        marginBottom: '26px'
+        marginBottom: '22px'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: '1 1 260px', minWidth: 0 }}>
           <div style={{
-            width: '48px',
-            height: '48px',
+            width: '44px',
+            height: '44px',
             borderRadius: '12px',
             background: 'linear-gradient(135deg, #06b6d4 0%, #10b981 100%)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#fff',
-            boxShadow: '0 4px 18px rgba(6, 182, 212, 0.35)'
+            boxShadow: '0 4px 18px rgba(6, 182, 212, 0.35)',
+            flexShrink: 0,
           }}>
-            <Users size={26} />
+            <Users size={24} />
           </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h1 style={{ fontSize: '1.6rem', fontWeight: 900, color: '#fff', margin: 0, letterSpacing: '-0.02em' }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <h1 style={{ fontSize: 'var(--fs-h1, 1.5rem)', fontWeight: 900, color: '#fff', margin: 0, letterSpacing: '-0.02em' }}>
                 Administración de Usuarios
               </h1>
               <span style={{
                 background: 'rgba(6, 182, 212, 0.15)',
                 color: 'var(--accent-cyan)',
                 border: '1px solid rgba(6, 182, 212, 0.35)',
-                fontSize: '0.72rem',
+                fontSize: '0.7rem',
                 fontWeight: 800,
-                padding: '3px 8px',
+                padding: '2px 7px',
                 borderRadius: '6px',
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -256,17 +257,17 @@ export const UserAdminModule: React.FC = () => {
                 <ShieldCheck size={13} /> ACCESO ADMIN
               </span>
             </div>
-            <p style={{ margin: '4px 0 0 0', fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
+            <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
               Identificación, verificación de correo electrónico y control de acceso institucional en Supabase
             </p>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button
             onClick={handleExportCSV}
             className="btn btn-secondary"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem' }}
             title="Exportar a CSV"
           >
             <Download size={15} /> Exportar CSV
@@ -276,7 +277,7 @@ export const UserAdminModule: React.FC = () => {
             onClick={loadProfiles}
             disabled={loading}
             className="btn btn-primary"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem' }}
           >
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
             Actualizar Datos
@@ -287,9 +288,9 @@ export const UserAdminModule: React.FC = () => {
       {/* 2. Tarjetas KPI de Métricas */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-        gap: '16px',
-        marginBottom: '26px'
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))',
+        gap: 'var(--grid-gap, 16px)',
+        marginBottom: '24px'
       }}>
         {/* Total Usuarios */}
         <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px', border: '1px solid var(--border-subtle)' }}>

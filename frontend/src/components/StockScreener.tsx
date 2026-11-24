@@ -17,7 +17,13 @@ import {
   ExternalLink,
   Star,
   Trash2,
-  Check
+  Check,
+  SlidersHorizontal,
+  LayoutGrid,
+  Table2,
+  MoreVertical,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { StockRecord } from '../types/stock';
@@ -27,6 +33,7 @@ import { getLatestOfficialFinancials } from '../services/quarterlyFinancialsServ
 import { calculateFactorGrades } from '../utils/quantRatings';
 import { formatCurrencyUSD, formatPercentage, formatVolumeShares } from '../utils/formatters';
 import { SCREENER_SESSION_STORAGE_KEY } from '../context/AuthContext';
+import { useViewport } from '../context/ViewportContext';
 import { AddPositionModal } from './AddPositionModal';
 import { AddToWatchlistModal } from './AddToWatchlistModal';
 
@@ -276,6 +283,9 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
   externalAIFilters,
   onOpenAgentDrawerWithQuery
 }) => {
+  const { isMobile, isDesktopWide, mobileScreenerLayout, setMobileScreenerLayout } = useViewport();
+  const [mobileFiltersExpanded, setMobileFiltersExpanded] = useState(false);
+
   // Estado completo del Screener respaldado en sessionStorage mientras dure la sesión activa
   const [config, setConfig] = useState<ScreenerViewConfig>(() => {
     return loadScreenerConfigFromStorage(sessionStorage, SCREENER_SESSION_STORAGE_KEY) || DEFAULT_SCREENER_CONFIG;
@@ -887,65 +897,78 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
   );
 
   return (
-    <div style={{ maxWidth: '100%', margin: '0 auto', padding: '16px 20px' }} className="animate-fade-in">
+    <div style={{ maxWidth: '100%', margin: '0 auto', padding: 'var(--page-py, 16px) var(--page-px, 20px)' }} className="animate-fade-in">
       
       {/* 1. Cabecera Principal y Exportación */}
-      <div className="glass-panel" style={{ padding: '16px 20px', marginBottom: '14px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+      <div className="glass-panel" style={{ padding: isMobile ? '12px 14px' : '16px 20px', marginBottom: isMobile ? '10px' : '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? '8px' : '12px' }}>
           <div>
-            <h1 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0, color: '#fff', display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Layers size={22} color="var(--accent-green)" />
+            <h1 style={{ fontSize: 'var(--fs-h1, 1.4rem)', fontWeight: 800, margin: 0, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Layers size={isMobile ? 19 : 22} color="var(--accent-green)" />
               Screener acciones
             </h1>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
-              Filtrado cuantitativo institucional multicriterio sobre <strong>{stocks.length.toLocaleString('es-CO')} acciones</strong> globales.
+            <p style={{ fontSize: isMobile ? '0.73rem' : '0.8rem', color: 'var(--text-secondary)', margin: '3px 0 0 0' }}>
+              {!isMobile && <>Filtrado cuantitativo institucional multicriterio sobre </>}
+              <strong>{stocks.length.toLocaleString('es-CO')} acciones</strong>{!isMobile && ' globales'}.{' '}
               Mostrando <span style={{ color: 'var(--accent-green)', fontWeight: 700 }}>{filteredStocks.length}</span> coincidencias.
             </p>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            {renderFavoriteApplyButton(false)}
-            {renderSaveFavoriteButton(false)}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            {!isMobile && renderFavoriteApplyButton(false)}
+            {!isMobile && renderSaveFavoriteButton(false)}
+            {isMobile && (
+              <button
+                type="button"
+                onClick={() => setMobileFiltersExpanded(prev => !prev)}
+                className={`btn ${mobileFiltersExpanded || activeFiltersCount > 0 ? 'btn-active' : 'btn-secondary'}`}
+                style={{ padding: '6px 10px', fontSize: '0.74rem', fontWeight: 700 }}
+              >
+                <SlidersHorizontal size={13} />
+                Filtros & IA {activeFiltersCount > 0 ? `(${activeFiltersCount})` : ''}
+                {mobileFiltersExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              </button>
+            )}
             <button 
               onClick={handleResetFilters} 
               className="btn btn-secondary" 
-              style={{ padding: '6px 12px', fontSize: '0.78rem' }}
+              style={{ padding: isMobile ? '6px 9px' : '6px 12px', fontSize: isMobile ? '0.73rem' : '0.78rem' }}
               title="Restablecer todos los filtros"
             >
               <RotateCcw size={13} />
-              Reset Filters {activeFiltersCount > 0 && `(${activeFiltersCount})`}
+              {isMobile ? (activeFiltersCount > 0 ? `Reset (${activeFiltersCount})` : 'Reset') : `Reset Filters ${activeFiltersCount > 0 ? `(${activeFiltersCount})` : ''}`}
             </button>
             <button 
               onClick={handleExportCSV} 
               className="btn btn-secondary" 
-              style={{ padding: '6px 12px', fontSize: '0.78rem' }}
+              style={{ padding: isMobile ? '6px 9px' : '6px 12px', fontSize: isMobile ? '0.73rem' : '0.78rem' }}
               title="Descargar tabla en archivo CSV"
             >
               <Download size={13} />
-              Exportar CSV ({filteredStocks.length})
+              {isMobile ? 'CSV' : `Exportar CSV (${filteredStocks.length})`}
             </button>
           </div>
         </div>
 
         {/* Barra de Tickers Múltiples (Estándar Finviz Tickers) */}
         <div style={{
-          marginTop: '12px',
-          padding: '10px 14px',
+          marginTop: isMobile ? '10px' : '12px',
+          padding: isMobile ? '8px 10px' : '10px 14px',
           background: 'rgba(7, 11, 20, 0.75)',
           border: '1px solid var(--border-subtle)',
           borderRadius: '8px',
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
+          gap: '8px',
           flexWrap: 'wrap'
         }}>
-          <span style={{ fontSize: '0.80rem', fontWeight: 800, color: 'var(--accent-cyan)', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--accent-cyan)', whiteSpace: 'nowrap' }}>
             Tickers:
           </span>
-          <div style={{ flex: 1, minWidth: '260px', position: 'relative' }}>
+          <div style={{ flex: 1, minWidth: isMobile ? '160px' : '260px', position: 'relative' }}>
             <input
               type="text"
-              placeholder="Introduce tickers separados por coma o espacio (ej: SNDK, MU, ASMI, NBIS, WDC, STX)..."
+              placeholder={isMobile ? 'Ej: NVDA, MU, AAPL, TSM...' : 'Introduce tickers separados por coma o espacio (ej: SNDK, MU, ASMI, NBIS, WDC, STX)...'}
               value={tickerQuery}
               onChange={(e) => updateConfig({ tickerQuery: e.target.value }, true)}
               style={{
@@ -953,7 +976,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                 background: '#040711',
                 border: '1px solid var(--border-medium)',
                 borderRadius: '6px',
-                padding: '6px 12px',
+                padding: '6px 10px',
                 color: '#fff',
                 fontSize: '0.82rem',
                 fontFamily: 'monospace'
@@ -964,30 +987,30 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
             <button 
               onClick={() => updateConfig({ tickerQuery: '' }, true)} 
               className="btn btn-secondary" 
-              style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+              style={{ padding: '4px 10px', fontSize: '0.74rem' }}
             >
-              Limpiar Tickers
+              Limpiar
             </button>
           )}
         </div>
 
-        {/* Fase 3: Barra de Filtrado por Lenguaje Natural con IA */}
+        {/* Fase 3: Barra de Filtrado por Lenguaje Natural con IA (Colapsable en Móvil) */}
         <div
           style={{
             marginTop: '10px',
-            padding: '10px 14px',
+            padding: isMobile ? '10px 12px' : '10px 14px',
             background: 'linear-gradient(90deg, rgba(16, 185, 129, 0.08) 0%, rgba(6, 182, 212, 0.08) 100%)',
             border: '1px solid rgba(16, 185, 129, 0.28)',
             borderRadius: '8px',
-            display: 'flex',
+            display: (!isMobile || mobileFiltersExpanded || Boolean(appliedAISummary)) ? 'flex' : 'none',
             flexDirection: 'column',
             gap: '8px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <span
               style={{
-                fontSize: '0.78rem',
+                fontSize: '0.76rem',
                 fontWeight: 800,
                 color: '#34d399',
                 display: 'flex',
@@ -1005,19 +1028,26 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                 e.preventDefault();
                 handleApplyNaturalLanguage();
               }}
-              style={{ flex: 1, minWidth: '280px', display: 'flex', gap: '8px' }}
+              style={{
+                flex: 1,
+                minWidth: isMobile ? '100%' : '280px',
+                display: 'flex',
+                flexWrap: isMobile ? 'wrap' : 'nowrap',
+                gap: '6px',
+              }}
             >
               <input
                 type="text"
-                placeholder="Ej: Empresas tecnológicas con ROIC > 15%, margen > 20% y baja deuda..."
+                placeholder="Ej: Tecnológicas con ROIC > 15%, margen > 20% y baja deuda..."
                 value={nlQuery}
                 onChange={(e) => updateConfig({ nlQuery: e.target.value })}
                 style={{
-                  flex: 1,
+                  flex: isMobile ? '1 1 100%' : 1,
+                  minWidth: 0,
                   background: '#040711',
                   border: '1px solid rgba(52, 211, 153, 0.35)',
                   borderRadius: '6px',
-                  padding: '6px 12px',
+                  padding: '6px 10px',
                   color: '#fff',
                   fontSize: '0.8rem',
                 }}
@@ -1026,8 +1056,9 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                 type="submit"
                 className="btn"
                 style={{
-                  padding: '6px 14px',
-                  fontSize: '0.76rem',
+                  flex: isMobile ? 1 : 'none',
+                  padding: '6px 12px',
+                  fontSize: '0.75rem',
                   fontWeight: 800,
                   background: 'linear-gradient(135deg, #059669 0%, #0284c7 100%)',
                   color: '#fff',
@@ -1048,10 +1079,12 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                   }
                   className="btn btn-secondary"
                   style={{
-                    padding: '6px 12px',
-                    fontSize: '0.75rem',
+                    flex: isMobile ? 1 : 'none',
+                    padding: '6px 10px',
+                    fontSize: '0.74rem',
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'center',
                     gap: '5px',
                     whiteSpace: 'nowrap',
                   }}
@@ -1081,10 +1114,11 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                     background: 'rgba(15, 23, 42, 0.85)',
                     border: '1px solid rgba(148, 163, 184, 0.2)',
                     borderRadius: '999px',
-                    padding: '2px 9px',
-                    fontSize: '0.68rem',
+                    padding: '3px 9px',
+                    fontSize: '0.67rem',
                     color: '#cbd5e1',
                     cursor: 'pointer',
+                    textAlign: 'left',
                   }}
                 >
                   {example}
@@ -1110,16 +1144,30 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           </div>
         </div>
 
-        {/* Presets Rápidos de Estrategia Institucional y Vista Favorita */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, marginRight: '4px' }}>
-            Presets:
-          </span>
+        {/* Presets Rápidos de Estrategia Institucional y Vista Favorita (Deslizables en móvil) */}
+        <div
+          className={isMobile ? 'hide-scrollbar' : undefined}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            flexWrap: isMobile ? 'nowrap' : 'wrap',
+            overflowX: isMobile ? 'auto' : 'visible',
+            WebkitOverflowScrolling: 'touch',
+            marginTop: '10px',
+            paddingBottom: isMobile ? '2px' : 0,
+          }}
+        >
+          {!isMobile && (
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, marginRight: '4px' }}>
+              Presets:
+            </span>
+          )}
           {renderFavoriteApplyButton(true)}
           {renderSaveFavoriteButton(true)}
           <button 
             className={`btn ${presetFilter === 'ALL' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.74rem' }}
+            style={{ padding: '4px 10px', fontSize: '0.73rem', flexShrink: 0 }}
             onClick={() => updateConfig({ presetFilter: 'ALL' }, true)}
           >
             Todas ({stocks.length})
@@ -1128,7 +1176,8 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
             className={`btn ${presetFilter === 'STRATEGY' ? 'btn-active' : 'btn-secondary'}`}
             style={{ 
               padding: '4px 10px', 
-              fontSize: '0.74rem',
+              fontSize: '0.73rem',
+              flexShrink: 0,
               border: presetFilter === 'STRATEGY' ? '1px solid var(--accent-green)' : '1px solid rgba(16, 185, 129, 0.35)',
               color: presetFilter === 'STRATEGY' ? '#fff' : 'var(--accent-green)'
             }}
@@ -1139,7 +1188,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           </button>
           <button 
             className={`btn ${presetFilter === 'VALUE' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.74rem' }}
+            style={{ padding: '4px 10px', fontSize: '0.73rem', flexShrink: 0 }}
             onClick={() => updateConfig({ presetFilter: 'VALUE' }, true)}
           >
             <DollarSign size={12} />
@@ -1147,7 +1196,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           </button>
           <button 
             className={`btn ${presetFilter === 'ROIC' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.74rem' }}
+            style={{ padding: '4px 10px', fontSize: '0.73rem', flexShrink: 0 }}
             onClick={() => updateConfig({ presetFilter: 'ROIC' }, true)}
           >
             <ShieldCheck size={12} />
@@ -1155,7 +1204,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           </button>
           <button 
             className={`btn ${presetFilter === 'RSI_BOUNCE' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.74rem' }}
+            style={{ padding: '4px 10px', fontSize: '0.73rem', flexShrink: 0 }}
             onClick={() => updateConfig({ presetFilter: 'RSI_BOUNCE' }, true)}
           >
             <TrendingUp size={12} />
@@ -1163,7 +1212,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           </button>
           <button 
             className={`btn ${presetFilter === 'MEGA_CAP' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.74rem' }}
+            style={{ padding: '4px 10px', fontSize: '0.73rem', flexShrink: 0 }}
             onClick={() => updateConfig({ presetFilter: 'MEGA_CAP' }, true)}
           >
             Megacaps (&gt; $50B)
@@ -1172,34 +1221,51 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
       </div>
 
       {/* 2. Tarjeta de Filtros Estilo Finviz (Descriptive, Fundamental, Technical, All) */}
-      <div className="glass-panel" style={{ padding: '14px 18px', marginBottom: '14px' }}>
+      <div
+        className="glass-panel"
+        style={{
+          padding: isMobile ? '12px' : '14px 18px',
+          marginBottom: isMobile ? '10px' : '14px',
+          display: (!isMobile || mobileFiltersExpanded) ? 'block' : 'none',
+        }}
+      >
         
         {/* Pestañas de Filtros de Finviz */}
-        <div style={{ display: 'flex', gap: '4px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '10px', marginBottom: '14px' }}>
+        <div
+          className="hide-scrollbar"
+          style={{
+            display: 'flex',
+            gap: '4px',
+            borderBottom: '1px solid var(--border-subtle)',
+            paddingBottom: '10px',
+            marginBottom: '12px',
+            overflowX: 'auto',
+          }}
+        >
           <button
             className={`btn ${activeCategory === 'descriptive' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 12px', fontSize: '0.76rem', fontWeight: 700 }}
+            style={{ padding: '4px 12px', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}
             onClick={() => updateConfig({ activeCategory: 'descriptive' })}
           >
             Descriptive
           </button>
           <button
             className={`btn ${activeCategory === 'fundamental' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 12px', fontSize: '0.76rem', fontWeight: 700 }}
+            style={{ padding: '4px 12px', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}
             onClick={() => updateConfig({ activeCategory: 'fundamental' })}
           >
             Fundamental
           </button>
           <button
             className={`btn ${activeCategory === 'technical' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 12px', fontSize: '0.76rem', fontWeight: 700 }}
+            style={{ padding: '4px 12px', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}
             onClick={() => updateConfig({ activeCategory: 'technical' })}
           >
             Technical
           </button>
           <button
             className={`btn ${activeCategory === 'all' ? 'btn-active' : 'btn-secondary'}`}
-            style={{ padding: '4px 12px', fontSize: '0.76rem', fontWeight: 700 }}
+            style={{ padding: '4px 12px', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}
             onClick={() => updateConfig({ activeCategory: 'all' })}
           >
             All Filters
@@ -1209,8 +1275,8 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
         {/* Rejilla de Selectores Dropdown Estilo Finviz */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(185px, 1fr))',
-          gap: '10px',
+          gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(auto-fill, minmax(185px, 1fr))',
+          gap: isMobile ? '8px' : '10px',
           fontSize: '0.76rem'
         }}>
           
@@ -1433,58 +1499,339 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
         </div>
       </div>
 
-      {/* 3. Selector de Vistas de Tabla (Custom = 28 columnas solicitadas por el usuario) */}
+      {/* 3. Selector de Vistas + Conmutador Móvil (Tarjetas | Tabla) + Ordenamiento */}
       <div style={{
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
+        flexDirection: 'column',
         gap: '8px',
         marginBottom: '10px',
-        padding: '0 4px'
+        padding: '0 2px'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-          {(
-            [
-              { id: 'custom', label: 'Custom (28 Columnas)', bold: true },
-              { id: 'overview', label: 'Overview', bold: false },
-              { id: 'valuation', label: 'Valoración', bold: false },
-              { id: 'financial', label: 'Financiero', bold: false },
-              { id: 'performance', label: 'Rendimiento', bold: false },
-              { id: 'technical', label: 'Técnico', bold: false },
-            ] as { id: TableView; label: string; bold: boolean }[]
-          ).map(({ id, label, bold }) => (
-            <button
-              key={id}
-              className={`btn ${tableView === id ? 'btn-active' : 'btn-secondary'}`}
-              style={{ padding: '4px 10px', fontSize: '0.74rem', fontWeight: bold ? 700 : 600 }}
-              onClick={() => updateConfig({ tableView: id })}
-            >
-              {label}
-            </button>
-          ))}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '8px',
+        }}>
+          <div
+            className={isMobile ? 'hide-scrollbar' : undefined}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              flexWrap: isMobile ? 'nowrap' : 'wrap',
+              overflowX: isMobile ? 'auto' : 'visible',
+              WebkitOverflowScrolling: 'touch',
+              maxWidth: '100%',
+              paddingBottom: isMobile ? '2px' : 0,
+            }}
+          >
+            {(
+              [
+                { id: 'custom', label: isMobile ? 'Custom (28)' : 'Custom (28 Columnas)', bold: true },
+                { id: 'overview', label: 'Overview', bold: false },
+                { id: 'valuation', label: 'Valoración', bold: false },
+                { id: 'financial', label: 'Financiero', bold: false },
+                { id: 'performance', label: 'Rendimiento', bold: false },
+                { id: 'technical', label: 'Técnico', bold: false },
+              ] as { id: TableView; label: string; bold: boolean }[]
+            ).map(({ id, label, bold }) => (
+              <button
+                key={id}
+                className={`btn ${tableView === id ? 'btn-active' : 'btn-secondary'}`}
+                style={{ padding: '4px 10px', fontSize: '0.73rem', fontWeight: bold ? 700 : 600, flexShrink: 0 }}
+                onClick={() => updateConfig({ tableView: id })}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: isMobile ? '100%' : 'auto', justifyContent: isMobile ? 'space-between' : 'flex-end' }}>
+            {/* Conmutador Tarjetas / Tabla en Celular */}
+            {isMobile && (
+              <div style={{
+                display: 'inline-flex',
+                background: '#080d18',
+                border: '1px solid var(--border-medium)',
+                borderRadius: '8px',
+                padding: '2px',
+                gap: '2px',
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setMobileScreenerLayout('cards')}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '4px 9px',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    borderRadius: '6px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    background: mobileScreenerLayout === 'cards' ? 'var(--accent-green-bg)' : 'transparent',
+                    color: mobileScreenerLayout === 'cards' ? 'var(--accent-green)' : 'var(--text-muted)',
+                  }}
+                >
+                  <LayoutGrid size={13} />
+                  Tarjetas
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMobileScreenerLayout('table')}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '4px 9px',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    borderRadius: '6px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    background: mobileScreenerLayout === 'table' ? 'var(--accent-green-bg)' : 'transparent',
+                    color: mobileScreenerLayout === 'table' ? 'var(--accent-green)' : 'var(--text-muted)',
+                  }}
+                >
+                  <Table2 size={13} />
+                  Tabla
+                </button>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+              <span>{isMobile ? 'Filas:' : 'Mostrar:'}</span>
+              <select 
+                value={pageSize} 
+                onChange={(e) => updateConfig({ pageSize: Number(e.target.value) }, true)}
+                style={{ ...selectStyle, width: 'auto', padding: '3px 8px', fontSize: '0.73rem' }}
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          <span>Mostrar:</span>
-          <select 
-            value={pageSize} 
-            onChange={(e) => updateConfig({ pageSize: Number(e.target.value) }, true)}
-            style={{ ...selectStyle, width: 'auto', padding: '3px 8px', fontSize: '0.74rem' }}
-          >
-            <option value={25}>25 filas</option>
-            <option value={50}>50 filas</option>
-            <option value={100}>100 filas</option>
-          </select>
-        </div>
+        {/* Selector de Ordenamiento Rápido en Modo Tarjetas Móvil */}
+        {isMobile && mobileScreenerLayout === 'cards' && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: 'rgba(11, 17, 30, 0.75)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '8px',
+            padding: '5px 8px',
+          }}>
+            <span style={{ fontSize: '0.71rem', color: 'var(--text-muted)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+              Ordenar por:
+            </span>
+            <select
+              value={sortField}
+              onChange={(e) => handleSort(e.target.value as SortField)}
+              style={{ ...selectStyle, flex: 1, padding: '4px 8px', fontSize: '0.74rem' }}
+            >
+              {CUSTOM_COLUMNS.map((col) => (
+                <option key={col.field} value={col.field}>
+                  {col.title ? `${col.label} — ${col.title}` : col.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => updateConfig({ sortAsc: !sortAsc })}
+              className="btn btn-secondary"
+              style={{ padding: '4px 8px', fontSize: '0.72rem', fontWeight: 800, flexShrink: 0 }}
+              title={sortAsc ? 'Orden Ascendente' : 'Orden Descendente'}
+            >
+              {sortAsc ? <ArrowUp size={13} color="var(--accent-green)" /> : <ArrowDown size={13} color="var(--accent-green)" />}
+              {sortAsc ? 'ASC' : 'DESC'}
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* 4. Tabla Unificada de Alta Densidad (Sin Deslizador Horizontal, Ajuste 100% Ancho) */}
+      {/* 4A. MODO TARJETAS BURSÁTILES COMPACTAS (Por defecto en Celular < 768px) */}
+      {isMobile && mobileScreenerLayout === 'cards' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '9px' }}>
+          {paginatedStocks.map((stock) => {
+            const analysis = calculateFactorGrades(stock);
+            const isSelected = selectedStock?.ticker === stock.ticker;
+            const fcfVal = computeStockFCF(stock);
+            const tgtDiff = computeTargetDiff(stock);
+
+            // Métricas dinámicas según la pestaña de vista activa
+            let cardMetrics: { label: string; value: React.ReactNode }[] = [];
+            if (tableView === 'valuation') {
+              cardMetrics = [
+                { label: 'Cap. Mercado', value: formatCurrencyUSD(stock.market_cap, { shortUnit: true }) },
+                { label: 'P/E Actual', value: stock.pe ? stock.pe.toFixed(1) : '—' },
+                { label: 'Forward P/E', value: <span style={{ color: 'var(--accent-cyan)' }}>{stock.forward_pe ? stock.forward_pe.toFixed(1) : '—'}</span> },
+                { label: 'PEG Ratio', value: <span style={{ color: stock.peg && stock.peg < 1 ? 'var(--accent-green)' : 'inherit' }}>{stock.peg ? stock.peg.toFixed(2) : '—'}</span> },
+                { label: 'P/S · EV/Eb', value: `${stock.ps ? stock.ps.toFixed(1) : '—'} · ${stock.ev_ebitda ? stock.ev_ebitda.toFixed(1) : '—'}` },
+                { label: 'FCF Anual', value: fcfVal !== null ? <span style={{ color: fcfVal >= 0 ? 'var(--accent-green)' : '#ef4444' }}>{formatCurrencyUSD(fcfVal, { shortUnit: true, decimals: 1, spaceBeforeUnit: false })}</span> : '—' },
+              ];
+            } else if (tableView === 'financial') {
+              cardMetrics = [
+                { label: 'Ventas TTM', value: formatCurrencyUSD(stock.sales, { shortUnit: true }) },
+                { label: 'Ventas YoY', value: stock.sales_yoy_ttm ? <span style={{ color: stock.sales_yoy_ttm >= 10 ? 'var(--accent-green)' : 'inherit' }}>{formatPercentage(stock.sales_yoy_ttm, 1)}</span> : '—' },
+                { label: 'Margen Neto', value: stock.profit_m !== undefined && stock.profit_m !== null ? <span style={{ color: stock.profit_m >= 15 ? 'var(--accent-green)' : 'inherit' }}>{stock.profit_m.toFixed(1)}%</span> : '—' },
+                { label: 'ROIC', value: stock.roic ? <span style={{ color: stock.roic >= 15 ? 'var(--accent-green)' : 'inherit' }}>{stock.roic.toFixed(1)}%</span> : '—' },
+                { label: 'Curr · Deuda/Eq', value: `${stock.curr_r ? stock.curr_r.toFixed(2) : '—'} · ${stock.debt_eq !== undefined && stock.debt_eq !== null ? stock.debt_eq.toFixed(2) : '—'}` },
+                { label: 'FCF Anual', value: fcfVal !== null ? <span style={{ color: fcfVal >= 0 ? 'var(--accent-green)' : '#ef4444' }}>{formatCurrencyUSD(fcfVal, { shortUnit: true, decimals: 1, spaceBeforeUnit: false })}</span> : '—' },
+              ];
+            } else if (tableView === 'performance' || tableView === 'technical') {
+              cardMetrics = [
+                { label: 'RSI (14D)', value: stock.rsi ? <span style={{ color: stock.rsi >= 70 ? '#ef4444' : stock.rsi <= 35 ? 'var(--accent-cyan)' : '#fff' }}>{stock.rsi.toFixed(1)}</span> : '—' },
+                { label: 'SMA 50 %', value: stock.sma50 !== undefined && stock.sma50 !== null ? <span style={{ color: stock.sma50 >= 0 ? 'var(--accent-green)' : '#ef4444' }}>{formatPercentage(stock.sma50, 1)}</span> : '—' },
+                { label: 'SMA 200 %', value: stock.sma200 !== undefined && stock.sma200 !== null ? <span style={{ color: stock.sma200 >= 0 ? 'var(--accent-green)' : '#ef4444' }}>{formatPercentage(stock.sma200, 1)}</span> : '—' },
+                { label: 'EPS Q/Q · 5A', value: `${stock.eps_qq !== undefined && stock.eps_qq !== null ? formatPercentage(stock.eps_qq, 1) : '—'} · ${stock.eps_past_5y ? formatPercentage(stock.eps_past_5y, 1) : '—'}` },
+                { label: 'Target · Dif.', value: tgtDiff ? <span style={{ color: tgtDiff.diffPct >= 0 ? 'var(--accent-green)' : '#ef4444' }}>${stock.target_price?.toFixed(0)} ({tgtDiff.diffPct >= 0 ? '+' : ''}{tgtDiff.diffPct.toFixed(1)}%)</span> : '—' },
+                { label: 'Volumen', value: formatVolumeShares(stock.volume) },
+              ];
+            } else {
+              // Custom (28 cols) u Overview: resumen ejecutivo de las métricas clave
+              cardMetrics = [
+                { label: 'Cap. Mercado', value: formatCurrencyUSD(stock.market_cap, { shortUnit: true }) },
+                { label: 'P/E · Fwd P/E', value: <span>{stock.pe ? stock.pe.toFixed(1) : '—'} · <span style={{ color: 'var(--accent-cyan)' }}>{stock.forward_pe ? stock.forward_pe.toFixed(1) : '—'}</span></span> },
+                { label: 'PEG · ROIC', value: <span><span style={{ color: stock.peg && stock.peg < 1 ? 'var(--accent-green)' : 'inherit' }}>{stock.peg ? stock.peg.toFixed(2) : '—'}</span> · <span style={{ color: (stock.roic ?? 0) >= 15 ? 'var(--accent-green)' : 'inherit' }}>{stock.roic ? `${stock.roic.toFixed(1)}%` : '—'}</span></span> },
+                { label: 'FCF Anual', value: fcfVal !== null ? <span style={{ color: fcfVal >= 0 ? 'var(--accent-green)' : '#ef4444' }}>{formatCurrencyUSD(fcfVal, { shortUnit: true, decimals: 1, spaceBeforeUnit: false })}</span> : '—' },
+                { label: 'Margen · RSI', value: `${stock.profit_m !== undefined && stock.profit_m !== null ? `${stock.profit_m.toFixed(1)}%` : '—'} · ${stock.rsi ? stock.rsi.toFixed(0) : '—'}` },
+                { label: 'Dif. Target', value: tgtDiff ? <span style={{ color: tgtDiff.diffPct >= 0 ? 'var(--accent-green)' : '#ef4444' }}>{tgtDiff.diffPct >= 0 ? '+' : ''}{tgtDiff.diffPct.toFixed(1)}% (${stock.target_price?.toFixed(0)})</span> : '—' },
+              ];
+            }
+
+            return (
+              <div
+                key={stock.ticker}
+                onClick={() => onSelectStock(stock)}
+                className="glass-panel"
+                style={{
+                  padding: '11px 12px',
+                  borderRadius: '11px',
+                  border: isSelected ? '1px solid var(--accent-green)' : '1px solid var(--border-subtle)',
+                  background: isSelected ? 'rgba(16, 185, 129, 0.08)' : 'rgba(13, 19, 31, 0.88)',
+                  cursor: 'pointer',
+                }}
+              >
+                {/* Cabecera de Tarjeta: Ticker + Quant + Precio + Botón Menú */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <span className="font-mono" style={{ fontSize: '0.95rem', fontWeight: 800, color: '#fff' }}>
+                        {stock.ticker}
+                      </span>
+                      <span
+                        style={{
+                          padding: '1px 5px',
+                          borderRadius: '4px',
+                          fontWeight: 800,
+                          fontSize: '0.64rem',
+                          background: analysis.quantScore >= 4.0 ? 'rgba(16, 185, 129, 0.2)' : analysis.quantScore >= 3.0 ? 'rgba(6, 182, 212, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                          color: analysis.quantScore >= 4.0 ? 'var(--accent-green)' : analysis.quantScore >= 3.0 ? 'var(--accent-cyan)' : '#ef4444',
+                          border: `1px solid ${analysis.quantScore >= 4.0 ? 'rgba(16, 185, 129, 0.4)' : analysis.quantScore >= 3.0 ? 'rgba(6, 182, 212, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                        }}
+                      >
+                        ★ {analysis.quantScore} · {analysis.quantRating.startsWith('Fuerte C') ? 'F. Compra' : analysis.quantRating}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: '2px' }}>
+                      {stock.company || '—'} {stock.sector ? <span style={{ color: 'var(--text-muted)' }}>• {stock.sector}</span> : null}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="font-mono" style={{ fontSize: '0.94rem', fontWeight: 800, color: '#fff' }}>
+                        ${stock.price !== undefined && stock.price !== null ? stock.price.toFixed(2) : '—'}
+                      </div>
+                      {stock.change_pct !== undefined && stock.change_pct !== null && (
+                        <div
+                          className="font-mono"
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            color: stock.change_pct >= 0 ? 'var(--accent-green)' : '#ef4444',
+                          }}
+                        >
+                          {stock.change_pct >= 0 ? '+' : ''}{stock.change_pct.toFixed(2)}%
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      aria-label={`Opciones para ${stock.ticker}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setContextMenu({ x: 16, y: 120, stock });
+                      }}
+                      style={{
+                        width: '30px',
+                        height: '30px',
+                        borderRadius: '7px',
+                        border: '1px solid var(--border-subtle)',
+                        background: 'rgba(255, 255, 255, 0.04)',
+                        color: 'var(--text-secondary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <MoreVertical size={15} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Grilla 3x2 de Métricas Clave */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                    gap: '6px',
+                    paddingTop: '7px',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+                  }}
+                >
+                  {cardMetrics.map((m, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        background: 'rgba(6, 10, 18, 0.65)',
+                        borderRadius: '6px',
+                        padding: '4px 6px',
+                        minWidth: 0,
+                      }}
+                    >
+                      <div style={{ fontSize: '0.59rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.02em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {m.label}
+                      </div>
+                      <div className="font-mono" style={{ fontSize: '0.72rem', fontWeight: 700, color: '#f1f5f9', marginTop: '1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {m.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 4B. Tabla Unificada de Alta Densidad (100% Fija en Monitores >= 1400px | Scroll Suave + Ticker Sticky en Portátiles/Tablets/Móvil) */}
+      {(!isMobile || mobileScreenerLayout === 'table') && (
       <div 
         className="glass-panel" 
         style={{ 
           width: '100%', 
-          overflowX: 'hidden', 
+          overflowX: isDesktopWide ? 'hidden' : 'auto', 
+          WebkitOverflowScrolling: 'touch',
           padding: '0', 
           borderRadius: '8px', 
           border: '1px solid var(--border-medium)' 
@@ -1492,9 +1839,10 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
       >
         <table style={{
           width: '100%',
+          minWidth: isDesktopWide ? '100%' : (tableView === 'custom' ? '1580px' : '820px'),
           tableLayout: 'fixed',
           borderCollapse: 'collapse',
-          fontSize: '0.67rem',
+          fontSize: isDesktopWide ? '0.67rem' : '0.71rem',
           letterSpacing: '-0.2px'
         }}>
           <thead>
@@ -1502,18 +1850,24 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
               {(tableView === 'custom' ? CUSTOM_COLUMNS : getPartialViewColumns(tableView)).map(({ field, label, title, align, width }) => {
                 const isSorted = sortField === field;
                 const isCustom = tableView === 'custom';
+                const isStickyTicker = !isDesktopWide && field === 'ticker';
                 return (
                   <th
                     key={field}
+                    className={isStickyTicker ? 'sticky-col-left' : undefined}
                     onClick={() => handleSort(field)}
                     style={{
                       width,
                       textAlign: align,
-                      padding: isCustom ? '7px 2px' : '7px 4px',
+                      padding: isCustom ? '7px 3px' : '7px 5px',
                       cursor: 'pointer',
                       userSelect: 'none',
                       color: isSorted ? '#fff' : 'var(--text-secondary)',
-                      background: isSorted ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
+                      background: isStickyTicker
+                        ? '#090e1a'
+                        : isSorted
+                        ? 'rgba(16, 185, 129, 0.12)'
+                        : 'transparent',
                       borderBottom: isSorted ? '2px solid var(--accent-green)' : '1px solid var(--border-medium)',
                       fontWeight: 700,
                       fontSize: isCustom ? '0.63rem' : '0.67rem',
@@ -1557,7 +1911,7 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                     borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
                     transition: 'background 0.12s ease'
                   }}
-                  className="data-row-hover"
+                  className={`data-row-hover ${isSelected ? 'selected-row' : ''}`}
                   onClick={() => onSelectStock(stock)}
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -1572,8 +1926,11 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                   {tableView === 'custom' && (
                     <>
                       {/* 1. Ticker */}
-                      <td style={{ padding: '4px 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        <span className="font-mono" style={{ fontWeight: 800, color: '#fff', fontSize: '0.72rem' }}>
+                      <td
+                        className={!isDesktopWide ? 'sticky-col-left' : undefined}
+                        style={{ padding: '5px 4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                      >
+                        <span className="font-mono" style={{ fontWeight: 800, color: '#fff', fontSize: '0.73rem' }}>
                           {stock.ticker}
                         </span>
                       </td>
@@ -1783,7 +2140,10 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
                   {/* FILAS DE VISTAS PARCIALES (OVERVIEW, VALUATION, FINANCIAL, ETC) */}
                   {tableView !== 'custom' && (
                     <>
-                      <td style={{ padding: '6px 4px' }}>
+                      <td
+                        className={!isDesktopWide ? 'sticky-col-left' : undefined}
+                        style={{ padding: '6px 6px' }}
+                      >
                         <span className="font-mono" style={{ fontWeight: 800, color: '#fff', fontSize: '0.80rem' }}>
                           {stock.ticker}
                         </span>
@@ -1869,29 +2229,30 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
           </tbody>
         </table>
       </div>
+      )}
 
       {/* 5. Controles de Paginación */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        justifyContent: isMobile ? 'center' : 'space-between',
         marginTop: '12px',
         padding: '0 4px',
         flexWrap: 'wrap',
         gap: '10px'
       }}>
-        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-          Mostrando página <strong>{page}</strong> de <strong>{Math.max(1, totalPages)}</strong> ({filteredStocks.length} resultados)
+        <div style={{ fontSize: isMobile ? '0.73rem' : '0.78rem', color: 'var(--text-muted)' }}>
+          Pág. <strong>{page}</strong> de <strong>{Math.max(1, totalPages)}</strong> ({filteredStocks.length} resultados)
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <button 
             className="btn btn-secondary" 
-            style={{ padding: '4px 8px', fontSize: '0.74rem' }}
+            style={{ padding: '5px 9px', fontSize: '0.74rem' }}
             disabled={page === 1}
             onClick={() => updateConfig({ page: Math.max(1, page - 1) })}
           >
-            <ChevronLeft size={13} /> Anterior
+            <ChevronLeft size={13} /> {!isMobile && 'Anterior'}
           </button>
           
           <div style={{ display: 'flex', gap: '2px' }}>
@@ -1922,34 +2283,53 @@ export const StockScreener: React.FC<StockScreenerProps> = ({
 
           <button 
             className="btn btn-secondary" 
-            style={{ padding: '4px 8px', fontSize: '0.74rem' }}
+            style={{ padding: '5px 9px', fontSize: '0.74rem' }}
             disabled={page >= totalPages}
             onClick={() => updateConfig({ page: Math.min(totalPages, page + 1) })}
           >
-            Siguiente <ChevronRight size={13} />
+            {!isMobile && 'Siguiente'} <ChevronRight size={13} />
           </button>
         </div>
       </div>
 
-      {/* Menú Contextual Flotante de Clic Derecho */}
+      {/* Menú Contextual Flotante (Clic Derecho en PC / Hoja de Acciones en Celular) */}
       {contextMenu && (
         <div
-          style={{
-            position: 'fixed',
-            top: contextMenu.y,
-            left: contextMenu.x,
-            zIndex: 9999,
-            background: 'rgba(11, 19, 32, 0.98)',
-            backdropFilter: 'blur(16px)',
-            border: '1px solid rgba(56, 189, 248, 0.35)',
-            borderRadius: '10px',
-            boxShadow: '0 16px 36px rgba(0, 0, 0, 0.75)',
-            minWidth: '230px',
-            padding: '6px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '2px',
-          }}
+          style={
+            isMobile
+              ? {
+                  position: 'fixed',
+                  left: '12px',
+                  right: '12px',
+                  bottom: 'calc(var(--mobile-bottom-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 12px)',
+                  zIndex: 9999,
+                  background: 'rgba(11, 19, 32, 0.99)',
+                  backdropFilter: 'blur(18px)',
+                  border: '1px solid rgba(56, 189, 248, 0.45)',
+                  borderRadius: '14px',
+                  boxShadow: '0 20px 45px rgba(0, 0, 0, 0.85)',
+                  padding: '10px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                }
+              : {
+                  position: 'fixed',
+                  top: contextMenu.y,
+                  left: contextMenu.x,
+                  zIndex: 9999,
+                  background: 'rgba(11, 19, 32, 0.98)',
+                  backdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(56, 189, 248, 0.35)',
+                  borderRadius: '10px',
+                  boxShadow: '0 16px 36px rgba(0, 0, 0, 0.75)',
+                  minWidth: '230px',
+                  padding: '6px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '2px',
+                }
+          }
           onClick={(e) => e.stopPropagation()}
         >
           <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', marginBottom: '4px' }}>

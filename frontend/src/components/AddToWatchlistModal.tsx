@@ -72,27 +72,18 @@ export const AddToWatchlistModal: React.FC<AddToWatchlistModalProps> = ({
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
-        background: 'rgba(3, 7, 18, 0.78)',
-        backdropFilter: 'blur(8px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px',
-      }}
+      className="modal-overlay-responsive"
       onClick={onClose}
     >
       <div
+        className="modal-sheet-responsive"
         style={{
           background: '#0b1320',
           border: '1px solid var(--border-medium)',
           borderRadius: '16px',
           width: '100%',
           maxWidth: '460px',
-          padding: '26px',
+          padding: 'clamp(18px, 3vw, 26px)',
           boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.8)',
         }}
         onClick={(e) => e.stopPropagation()}

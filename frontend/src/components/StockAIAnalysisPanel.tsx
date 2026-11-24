@@ -996,10 +996,10 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
           </div>
 
           {/* 2 & 3. SECCIÓN: POSICIÓN COMPETITIVA Y RIVAL PRINCIPAL */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 'var(--grid-gap, 20px)' }}>
             
             {/* 2. Posición Competitiva (Análisis Propio de Foso Económico / Moat) */}
-            <div className="glass-panel" style={{ padding: '22px', border: '1px solid var(--border-subtle)', borderRadius: '14px' }}>
+            <div className="glass-panel" style={{ padding: 'var(--card-pad, 20px)', border: '1px solid var(--border-subtle)', borderRadius: '14px' }}>
               <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Award size={18} color="var(--accent-cyan)" /> 2. Posición Competitiva & Ventaja Diferencial
               </h3>
@@ -1337,12 +1337,12 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
           </div>
 
           {/* 7 & 8. SECCIONES: CRECIMIENTO HISTÓRICO 5 AÑOS Y PROYECCIÓN 3-5 AÑOS */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 'var(--grid-gap, 20px)' }}>
             
             {/* 7. Crecimiento Histórico Últimos 5 Años */}
-            <div className="glass-panel" style={{ padding: '22px', border: '1px solid var(--border-subtle)', borderRadius: '14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+            <div className="glass-panel" style={{ padding: 'var(--card-pad, 20px)', border: '1px solid var(--border-subtle)', borderRadius: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '6px' }}>
+                <h3 style={{ fontSize: '1.02rem', fontWeight: 800, color: '#fff', margin: 0 }}>
                   7. Crecimiento Histórico (5 Años)
                 </h3>
                 <span style={{ fontSize: '0.70rem', background: 'rgba(6, 182, 212, 0.15)', color: 'var(--accent-cyan)', padding: '2px 8px', borderRadius: '4px', fontWeight: 800 }}>
@@ -1351,7 +1351,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
               </div>
 
               {/* CAGRs */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '8px', marginBottom: '14px' }}>
                 <div style={{ background: '#070b14', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
                   <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>CAGR Ventas</div>
                   <div style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)' }}>+{stock.sales_past_5y ? stock.sales_past_5y.toFixed(1) + '%' : '12.4%'}</div>
@@ -1371,28 +1371,30 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
               </div>
 
               {/* Tabla Histórica */}
-              <table style={{ width: '100%', fontSize: '0.74rem', borderCollapse: 'collapse', textAlign: 'right', marginBottom: '12px' }}>
-                <thead>
-                  <tr style={{ background: '#0f172a', color: 'var(--text-muted)' }}>
-                    <th style={{ padding: '6px 8px', textAlign: 'left' }}>Año</th>
-                    <th style={{ padding: '6px 8px' }}>Market Cap</th>
-                    <th style={{ padding: '6px 8px' }}>Ventas</th>
-                    <th style={{ padding: '6px 8px' }}>EPS Adj.</th>
-                    <th style={{ padding: '6px 8px' }}>FCF</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {financialData.historical5Y.map((r, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                      <td style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 700, color: '#fff' }}>{r.year}</td>
-                      <td className="font-mono" style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{r.mcap}</td>
-                      <td className="font-mono" style={{ padding: '6px 8px', color: '#fff' }}>{r.sales}</td>
-                      <td className="font-mono" style={{ padding: '6px 8px', color: 'var(--accent-cyan)' }}>{r.eps}</td>
-                      <td className="font-mono" style={{ padding: '6px 8px', color: 'var(--accent-green)', fontWeight: 700 }}>{r.fcf}</td>
+              <div style={{ overflowX: 'auto', marginBottom: '12px' }}>
+                <table style={{ width: '100%', minWidth: '340px', fontSize: '0.74rem', borderCollapse: 'collapse', textAlign: 'right' }}>
+                  <thead>
+                    <tr style={{ background: '#0f172a', color: 'var(--text-muted)' }}>
+                      <th style={{ padding: '6px 8px', textAlign: 'left' }}>Año</th>
+                      <th style={{ padding: '6px 8px' }}>Market Cap</th>
+                      <th style={{ padding: '6px 8px' }}>Ventas</th>
+                      <th style={{ padding: '6px 8px' }}>EPS Adj.</th>
+                      <th style={{ padding: '6px 8px' }}>FCF</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {financialData.historical5Y.map((r, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <td style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 700, color: '#fff' }}>{r.year}</td>
+                        <td className="font-mono" style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{r.mcap}</td>
+                        <td className="font-mono" style={{ padding: '6px 8px', color: '#fff' }}>{r.sales}</td>
+                        <td className="font-mono" style={{ padding: '6px 8px', color: 'var(--accent-cyan)' }}>{r.eps}</td>
+                        <td className="font-mono" style={{ padding: '6px 8px', color: 'var(--accent-green)', fontWeight: 700 }}>{r.fcf}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
               <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
                 <strong style={{ color: '#fff' }}>Diagnóstico de Creación de Valor:</strong> Crecimiento sostenido con expansión de márgenes operativos y fuerte conversión de EBITDA a Flujo de Caja Libre.
@@ -1400,9 +1402,9 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
             </div>
 
             {/* 8. Próximos 3-5 Años con Tabla de Valores */}
-            <div className="glass-panel" style={{ padding: '22px', border: '1px solid var(--border-subtle)', borderRadius: '14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+            <div className="glass-panel" style={{ padding: 'var(--card-pad, 20px)', border: '1px solid var(--border-subtle)', borderRadius: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '6px' }}>
+                <h3 style={{ fontSize: '1.02rem', fontWeight: 800, color: '#fff', margin: 0 }}>
                   8. Próximos 3-5 Años (Proyecciones)
                 </h3>
                 <span style={{ fontSize: '0.70rem', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--accent-green)', padding: '2px 8px', borderRadius: '4px', fontWeight: 800 }}>
@@ -1411,7 +1413,7 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
               </div>
 
               {/* CAGRs Proyectados */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '8px', marginBottom: '14px' }}>
                 <div style={{ background: '#070b14', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
                   <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Ventas Est.</div>
                   <div style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)' }}>+10.5%</div>
@@ -1431,28 +1433,30 @@ export const StockAIAnalysisPanel: React.FC<StockAIAnalysisPanelProps> = ({
               </div>
 
               {/* Tabla Proyectada */}
-              <table style={{ width: '100%', fontSize: '0.74rem', borderCollapse: 'collapse', textAlign: 'right', marginBottom: '12px' }}>
-                <thead>
-                  <tr style={{ background: '#0f172a', color: 'var(--text-muted)' }}>
-                    <th style={{ padding: '6px 8px', textAlign: 'left' }}>Año Proy.</th>
-                    <th style={{ padding: '6px 8px' }}>Market Cap</th>
-                    <th style={{ padding: '6px 8px' }}>Ventas</th>
-                    <th style={{ padding: '6px 8px' }}>EPS Adj.</th>
-                    <th style={{ padding: '6px 8px' }}>FCF</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {financialData.projectedFuture.map((r, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,200,0.05)' }}>
-                      <td style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 700, color: 'var(--accent-green)' }}>{r.year}</td>
-                      <td className="font-mono" style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{r.mcap}</td>
-                      <td className="font-mono" style={{ padding: '6px 8px', color: '#fff' }}>{r.sales}</td>
-                      <td className="font-mono" style={{ padding: '6px 8px', color: 'var(--accent-cyan)' }}>{r.eps}</td>
-                      <td className="font-mono" style={{ padding: '6px 8px', color: 'var(--accent-green)', fontWeight: 700 }}>{r.fcf}</td>
+              <div style={{ overflowX: 'auto', marginBottom: '12px' }}>
+                <table style={{ width: '100%', minWidth: '340px', fontSize: '0.74rem', borderCollapse: 'collapse', textAlign: 'right' }}>
+                  <thead>
+                    <tr style={{ background: '#0f172a', color: 'var(--text-muted)' }}>
+                      <th style={{ padding: '6px 8px', textAlign: 'left' }}>Año Proy.</th>
+                      <th style={{ padding: '6px 8px' }}>Market Cap</th>
+                      <th style={{ padding: '6px 8px' }}>Ventas</th>
+                      <th style={{ padding: '6px 8px' }}>EPS Adj.</th>
+                      <th style={{ padding: '6px 8px' }}>FCF</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {financialData.projectedFuture.map((r, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,200,0.05)' }}>
+                        <td style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 700, color: 'var(--accent-green)' }}>{r.year}</td>
+                        <td className="font-mono" style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{r.mcap}</td>
+                        <td className="font-mono" style={{ padding: '6px 8px', color: '#fff' }}>{r.sales}</td>
+                        <td className="font-mono" style={{ padding: '6px 8px', color: 'var(--accent-cyan)' }}>{r.eps}</td>
+                        <td className="font-mono" style={{ padding: '6px 8px', color: 'var(--accent-green)', fontWeight: 700 }}>{r.fcf}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
               {/* Cajas de Backlog y CapEx */}
               <div style={{ background: '#070b14', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border-subtle)', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>

@@ -4,6 +4,7 @@ import {
   Search
 } from 'lucide-react';
 import type { StockRecord } from '../types/stock';
+import { useViewport } from '../context/ViewportContext';
 
 interface FinvizMapProps {
   stocks: StockRecord[];
@@ -37,6 +38,7 @@ const getTier = (cap?: number): 'megaLarge' | 'mid' | 'small' | 'micro' | 'nano'
 };
 
 export const FinvizMap: React.FC<FinvizMapProps> = ({ stocks, onSelectStock }) => {
+  const { isMobileOrTablet } = useViewport();
   const [dataType, setDataType] = useState<DataType>('perf_day');
   const [selectedSector, setSelectedSector] = useState<string>('All');
   const [selectedIndustry, setSelectedIndustry] = useState<string>('All');
@@ -185,38 +187,38 @@ export const FinvizMap: React.FC<FinvizMapProps> = ({ stocks, onSelectStock }) =
   };
 
   return (
-    <div style={{ maxWidth: '1600px', margin: '0 auto', padding: '24px' }}>
+    <div style={{ maxWidth: '1600px', margin: '0 auto', padding: 'var(--page-py, 20px) var(--page-px, 16px)' }}>
       
       {/* Cabecera Principal */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <h1 style={{ fontSize: '1.6rem', fontWeight: 800, margin: 0, color: '#fff', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Grid size={22} color="var(--accent-cyan)" />
+        <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+          <h1 style={{ fontSize: 'var(--fs-h1, 1.5rem)', fontWeight: 800, margin: 0, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Grid size={21} color="var(--accent-cyan)" />
             Finviz Maps — Matriz Sectorial & Heatmap
           </h1>
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
             Acciones de la bolsa de EE.UU. categorizadas por sectores e industrias. Columnas divididas por tiers de capitalización.
           </p>
         </div>
 
         {/* Barra de Leyenda Térmica */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(15, 23, 42, 0.8)', padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginRight: '6px', fontWeight: 600 }}>Rango:</span>
-          <span style={{ background: '#b91c1c', color: '#fff', padding: '2px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 700 }}>-3%</span>
-          <span style={{ background: '#dc2626', color: '#fff', padding: '2px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 700 }}>-2%</span>
-          <span style={{ background: '#ef4444', color: '#fff', padding: '2px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 700 }}>-1%</span>
-          <span style={{ background: '#334155', color: '#fff', padding: '2px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 700 }}>0%</span>
-          <span style={{ background: '#22c55e', color: '#fff', padding: '2px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 700 }}>+1%</span>
-          <span style={{ background: '#16a34a', color: '#fff', padding: '2px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 700 }}>+2%</span>
-          <span style={{ background: '#15803d', color: '#fff', padding: '2px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 700 }}>+3%</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', background: 'rgba(15, 23, 42, 0.8)', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginRight: '4px', fontWeight: 600 }}>Rango:</span>
+          <span style={{ background: '#b91c1c', color: '#fff', padding: '2px 5px', borderRadius: '3px', fontSize: '0.68rem', fontWeight: 700 }}>-3%</span>
+          <span style={{ background: '#dc2626', color: '#fff', padding: '2px 5px', borderRadius: '3px', fontSize: '0.68rem', fontWeight: 700 }}>-2%</span>
+          <span style={{ background: '#ef4444', color: '#fff', padding: '2px 5px', borderRadius: '3px', fontSize: '0.68rem', fontWeight: 700 }}>-1%</span>
+          <span style={{ background: '#334155', color: '#fff', padding: '2px 5px', borderRadius: '3px', fontSize: '0.68rem', fontWeight: 700 }}>0%</span>
+          <span style={{ background: '#22c55e', color: '#fff', padding: '2px 5px', borderRadius: '3px', fontSize: '0.68rem', fontWeight: 700 }}>+1%</span>
+          <span style={{ background: '#16a34a', color: '#fff', padding: '2px 5px', borderRadius: '3px', fontSize: '0.68rem', fontWeight: 700 }}>+2%</span>
+          <span style={{ background: '#15803d', color: '#fff', padding: '2px 5px', borderRadius: '3px', fontSize: '0.68rem', fontWeight: 700 }}>+3%</span>
         </div>
       </div>
 
       {/* Disposición Principal: Barra Lateral Izquierda + Matriz Derecha */}
-      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '20px', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobileOrTablet ? 'minmax(0, 1fr)' : '260px minmax(0, 1fr)', gap: 'var(--grid-gap, 20px)', alignItems: 'start' }}>
         
         {/* BARRA LATERAL DE CONTROL (Estilo Finviz Maps) */}
-        <div className="glass-panel" style={{ padding: '16px', position: 'sticky', top: '90px' }}>
+        <div className="glass-panel" style={{ padding: '16px', position: isMobileOrTablet ? 'static' : 'sticky', top: '90px' }}>
           
           <div style={{ marginBottom: '16px' }}>
             <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '6px' }}>

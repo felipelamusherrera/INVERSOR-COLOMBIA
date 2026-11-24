@@ -79,27 +79,18 @@ export const AddPositionModal: React.FC<AddPositionModalProps> = ({
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
-        background: 'rgba(3, 7, 18, 0.78)',
-        backdropFilter: 'blur(8px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px',
-      }}
+      className="modal-overlay-responsive"
       onClick={onClose}
     >
       <div
+        className="modal-sheet-responsive"
         style={{
           background: '#0b1320',
           border: '1px solid var(--border-medium)',
           borderRadius: '16px',
           width: '100%',
           maxWidth: '520px',
-          padding: '28px',
+          padding: 'clamp(18px, 3vw, 28px)',
           boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.8)',
         }}
         onClick={(e) => e.stopPropagation()}
@@ -117,12 +108,13 @@ export const AddPositionModal: React.FC<AddPositionModalProps> = ({
                 alignItems: 'center',
                 justifyContent: 'center',
                 border: '1px solid rgba(16, 185, 129, 0.3)',
+                flexShrink: 0,
               }}
             >
               <Briefcase size={20} />
             </div>
             <div>
-              <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+              <h3 style={{ fontSize: 'clamp(1.02rem, 2vw, 1.2rem)', fontWeight: 800, color: '#fff', margin: 0 }}>
                 Registrar Posición en Cartera
               </h3>
               <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
@@ -169,7 +161,7 @@ export const AddPositionModal: React.FC<AddPositionModalProps> = ({
             <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px' }}>
               Estrategia / Dirección de la Posición
             </label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: '10px' }}>
               <button
                 type="button"
                 onClick={() => setDirection('LONG')}
@@ -177,7 +169,7 @@ export const AddPositionModal: React.FC<AddPositionModalProps> = ({
                   padding: '10px',
                   borderRadius: '8px',
                   fontWeight: 800,
-                  fontSize: '0.85rem',
+                  fontSize: '0.82rem',
                   border: direction === 'LONG' ? '2px solid var(--accent-green)' : '1px solid var(--border-subtle)',
                   background: direction === 'LONG' ? 'rgba(16, 185, 129, 0.2)' : '#070b14',
                   color: direction === 'LONG' ? 'var(--accent-green)' : 'var(--text-secondary)',
@@ -188,7 +180,7 @@ export const AddPositionModal: React.FC<AddPositionModalProps> = ({
                   gap: '6px',
                 }}
               >
-                <TrendingUp size={16} /> LONG (Compra / Alcista)
+                <TrendingUp size={16} /> LONG (Alcista)
               </button>
 
               <button
@@ -198,7 +190,7 @@ export const AddPositionModal: React.FC<AddPositionModalProps> = ({
                   padding: '10px',
                   borderRadius: '8px',
                   fontWeight: 800,
-                  fontSize: '0.85rem',
+                  fontSize: '0.82rem',
                   border: direction === 'SHORT' ? '2px solid var(--accent-red)' : '1px solid var(--border-subtle)',
                   background: direction === 'SHORT' ? 'rgba(239, 68, 68, 0.2)' : '#070b14',
                   color: direction === 'SHORT' ? 'var(--accent-red)' : 'var(--text-secondary)',
@@ -209,13 +201,13 @@ export const AddPositionModal: React.FC<AddPositionModalProps> = ({
                   gap: '6px',
                 }}
               >
-                <TrendingDown size={16} /> SHORT (Venta en Corto)
+                <TrendingDown size={16} /> SHORT (Corto)
               </button>
             </div>
           </div>
 
           {/* Cantidad y Precio de Entrada */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: '12px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '5px' }}>
                 Cantidad de Acciones (Lote)
@@ -268,7 +260,7 @@ export const AddPositionModal: React.FC<AddPositionModalProps> = ({
           </div>
 
           {/* Parámetros Tácticos Sugeridos: Stop Loss y Targets */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 110px), 1fr))', gap: '10px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.72rem', color: '#ef4444', fontWeight: 700, marginBottom: '4px' }}>
                 Stop Loss (-4.8%)
@@ -335,7 +327,7 @@ export const AddPositionModal: React.FC<AddPositionModalProps> = ({
           </div>
 
           {/* Fecha y Notas */}
-          <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '10px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '5px' }}>
                 Fecha

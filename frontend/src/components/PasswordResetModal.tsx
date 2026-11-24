@@ -85,24 +85,11 @@ export const PasswordResetModal: React.FC<PasswordResetModalProps> = ({
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.78)',
-      backdropFilter: 'blur(10px)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 3000,
-      padding: '20px'
-    }}>
-      <div className="glass-panel" style={{
+    <div className="modal-overlay-responsive" style={{ zIndex: 3000 }}>
+      <div className="glass-panel modal-sheet-responsive" style={{
         maxWidth: '460px',
         width: '100%',
-        padding: '30px',
+        padding: 'clamp(20px, 4vw, 30px)',
         borderRadius: '16px',
         background: '#0b1120',
         border: '1px solid var(--border-medium)',

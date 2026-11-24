@@ -19,6 +19,8 @@ import type { AgentIntentType, ScreenerUIFilterPayload } from './types/agent';
 import { Toaster, toast } from 'sonner';
 import { AlertCircle, RefreshCw, Database, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { PasswordResetModal } from './components/PasswordResetModal';
+import { MobileBottomNav } from './components/MobileBottomNav';
+import { ViewportProvider } from './context/ViewportContext';
 
 export type MainTabType = 
   | 'dashboard' 
@@ -606,16 +608,26 @@ function AppContent() {
         }}
       />
 
+      {/* Barra Inferior Fija en Dispositivos Móviles */}
+      <MobileBottomNav
+        currentTab={currentTab}
+        setCurrentTab={(tab) => setCurrentTab(tab as MainTabType)}
+        isAdmin={isAdmin}
+        onToggleAgentDrawer={() => setIsAgentDrawerOpen(!isAgentDrawerOpen)}
+        isAgentDrawerOpen={isAgentDrawerOpen}
+        activeStockTicker={activeStockTicker}
+      />
+
       {/* Footer Institucional */}
       <footer className="footer">
-        <div style={{ maxWidth: '1600px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--state-success)' }} />
+        <div style={{ maxWidth: '1600px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', textAlign: 'left' }}>
+            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--state-success)', flexShrink: 0 }} />
             <span style={{ fontWeight: 600, color: '#fff' }}>Inversor Colombia</span>
             <span>— Modelo Cuantitativo Factorial & Comité de 4 Agentes de Inversión</span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '0.78rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.75rem', flexWrap: 'wrap' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <Database size={13} color="var(--brand-primary)" />
               Supabase PostgreSQL (103 métricas Finviz)
@@ -633,9 +645,11 @@ function AppContent() {
 
 export function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <ViewportProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </ViewportProvider>
   );
 }
 

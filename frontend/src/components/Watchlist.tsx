@@ -53,6 +53,7 @@ import {
 } from '../utils/customWatchlistService';
 import { AddPositionModal } from './AddPositionModal';
 import { AddToWatchlistModal } from './AddToWatchlistModal';
+import { useViewport } from '../context/ViewportContext';
 
 export interface PortfolioPosition {
   id: string;
@@ -109,6 +110,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
   onGoToScreener,
   onAuditPortfolioWithAI
 }) => {
+  const { isMobile, isMobileOrTablet } = useViewport();
   // Modal de Añadir Posición
   const [showAddModal, setShowAddModal] = useState(false);
   const [modalTicker, setModalTicker] = useState('NVDA');
@@ -648,30 +650,32 @@ export const Watchlist: React.FC<WatchlistProps> = ({
   }, [pnlTimeframe, portfolioSummary.totalUnrealizedPnl, oldestPositionDate]);
 
   return (
-    <div style={{ maxWidth: '1600px', margin: '0 auto', padding: '32px 24px', width: '100%' }}>
+    <div style={{ maxWidth: '1600px', margin: '0 auto', padding: 'var(--page-py, 24px) var(--page-px, 16px)', width: '100%' }}>
       
       {/* 0. NAVEGACIÓN SEGMENTADA PRINCIPAL: MI CARTERA VS LISTAS DE SEGUIMIENTO */}
       <div style={{ 
         display: 'flex', 
         alignItems: 'center', 
         justifyContent: 'space-between', 
-        gap: '12px', 
+        gap: '10px', 
         borderBottom: '1px solid var(--border-medium)', 
-        marginBottom: '28px', 
-        paddingBottom: '16px',
+        marginBottom: 'clamp(16px, 2.5vw, 28px)', 
+        paddingBottom: '14px',
         flexWrap: 'wrap'
       }}>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
           <button
             id="tab-btn-cartera"
             onClick={() => setActiveMainTab('PORTFOLIO')}
             style={{
+              flex: isMobile ? '1 1 100%' : '0 1 auto',
               display: 'flex',
               alignItems: 'center',
+              justifyContent: isMobile ? 'space-between' : 'flex-start',
               gap: '8px',
-              padding: '10px 18px',
+              padding: isMobile ? '9px 14px' : '10px 18px',
               borderRadius: '10px',
-              fontSize: '0.92rem',
+              fontSize: isMobile ? '0.84rem' : '0.92rem',
               fontWeight: 800,
               cursor: 'pointer',
               transition: 'all 0.2s ease',
@@ -682,8 +686,10 @@ export const Watchlist: React.FC<WatchlistProps> = ({
               border: activeMainTab === 'PORTFOLIO' ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid var(--border-subtle)',
             }}
           >
-            <Briefcase size={18} />
-            Mi Cartera (Posiciones Reales)
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <Briefcase size={17} />
+              Mi Cartera (Posiciones Reales)
+            </span>
             <span style={{
               fontSize: '0.72rem',
               padding: '2px 8px',
@@ -699,12 +705,14 @@ export const Watchlist: React.FC<WatchlistProps> = ({
             id="tab-btn-listas"
             onClick={() => setActiveMainTab('WATCHLISTS')}
             style={{
+              flex: isMobile ? '1 1 100%' : '0 1 auto',
               display: 'flex',
               alignItems: 'center',
+              justifyContent: isMobile ? 'space-between' : 'flex-start',
               gap: '8px',
-              padding: '10px 18px',
+              padding: isMobile ? '9px 14px' : '10px 18px',
               borderRadius: '10px',
-              fontSize: '0.92rem',
+              fontSize: isMobile ? '0.84rem' : '0.92rem',
               fontWeight: 800,
               cursor: 'pointer',
               transition: 'all 0.2s ease',
@@ -715,8 +723,10 @@ export const Watchlist: React.FC<WatchlistProps> = ({
               border: activeMainTab === 'WATCHLISTS' ? '1px solid rgba(52, 211, 153, 0.4)' : '1px solid var(--border-subtle)',
             }}
           >
-            <Bookmark size={18} />
-            Listas de Seguimiento Agrupadas
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <Bookmark size={17} />
+              Listas de Seguimiento Agrupadas
+            </span>
             <span style={{
               fontSize: '0.72rem',
               padding: '2px 8px',
@@ -733,7 +743,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
           <button
             onClick={() => setShowCreateListModal(true)}
             className="btn btn-primary"
-            style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+            style={{ padding: '8px 16px', fontSize: '0.84rem', width: isMobile ? '100%' : 'auto' }}
           >
             <FolderPlus size={16} />
             + Nueva Lista de Seguimiento
@@ -744,10 +754,10 @@ export const Watchlist: React.FC<WatchlistProps> = ({
       {activeMainTab === 'PORTFOLIO' && (
         <>
           {/* 1. HEADER Y ACCIONES PRINCIPALES */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h1 style={{ fontSize: '1.85rem', fontWeight: 900, color: '#fff', margin: 0, letterSpacing: '-0.5px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', flexWrap: 'wrap', gap: '14px' }}>
+        <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <h1 style={{ fontSize: 'clamp(1.35rem, 3vw, 1.85rem)', fontWeight: 900, color: '#fff', margin: 0, letterSpacing: '-0.5px' }}>
               Mi Cartera de Inversión
             </h1>
             <span style={{ 
@@ -756,25 +766,25 @@ export const Watchlist: React.FC<WatchlistProps> = ({
               border: '1px solid rgba(16, 185, 129, 0.3)',
               borderRadius: '20px',
               padding: '2px 10px',
-              fontSize: '0.78rem',
+              fontSize: '0.74rem',
               fontWeight: 800
             }}>
               {portfolioSummary.stocksCount} Activos · {portfolioSummary.openPositionsCount} Lotes
             </span>
           </div>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', margin: '6px 0 0 0' }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.84rem', margin: '6px 0 0 0' }}>
             Gestión institucional de posiciones Long/Short con promedios ponderados, cierre por lote y control de efectivo.
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           {onAuditPortfolioWithAI && (
             <button
               onClick={onAuditPortfolioWithAI}
               className="btn"
               style={{
-                padding: '8px 14px',
-                fontSize: '0.85rem',
+                padding: '7px 12px',
+                fontSize: '0.8rem',
                 fontWeight: 800,
                 background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%)',
                 border: '1px solid rgba(16, 185, 129, 0.45)',
@@ -789,7 +799,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
           <button 
             onClick={onGoToScreener} 
             className="btn btn-secondary"
-            style={{ padding: '8px 14px', fontSize: '0.85rem' }}
+            style={{ padding: '7px 12px', fontSize: '0.8rem' }}
           >
             <Eye size={15} />
             Explorar Screener
@@ -798,7 +808,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
           <button 
             onClick={() => setShowCashModal(true)}
             className="btn btn-secondary"
-            style={{ padding: '8px 14px', fontSize: '0.85rem', borderColor: 'rgba(16, 185, 129, 0.4)', color: 'var(--accent-green)' }}
+            style={{ padding: '7px 12px', fontSize: '0.8rem', borderColor: 'rgba(16, 185, 129, 0.4)', color: 'var(--accent-green)' }}
           >
             <DollarSign size={15} />
             Gestionar Efectivo
@@ -811,7 +821,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
               setShowAddModal(true);
             }} 
             className="btn btn-primary"
-            style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+            style={{ padding: '7px 14px', fontSize: '0.8rem' }}
           >
             <Plus size={16} />
             Añadir Posición Long/Short
@@ -822,51 +832,51 @@ export const Watchlist: React.FC<WatchlistProps> = ({
       {/* 2. TARJETAS KPI (Total Cartera, Renta Variable, Efectivo, P&L No Realizado y P&L Realizado) */}
       <div style={{ 
         display: 'grid', 
-        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', 
-        gap: '16px', 
-        marginBottom: '28px' 
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', 
+        gap: 'var(--grid-gap, 16px)', 
+        marginBottom: '24px' 
       }}>
         {/* KPI 1: Valor Total de Cartera */}
-        <div className="glass-panel" style={{ padding: '20px', borderLeft: '4px solid var(--accent-cyan)' }}>
+        <div className="glass-panel" style={{ padding: 'var(--card-pad, 18px)', borderLeft: '4px solid var(--accent-cyan)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
               Valor Total Cartera
             </span>
             <Briefcase size={17} color="var(--accent-cyan)" />
           </div>
-          <div className="font-mono" style={{ fontSize: '1.75rem', fontWeight: 900, color: '#fff', marginTop: '8px' }}>
+          <div className="font-mono" style={{ fontSize: 'clamp(1.35rem, 2.5vw, 1.75rem)', fontWeight: 900, color: '#fff', marginTop: '8px' }}>
             ${portfolioSummary.totalPortfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </div>
-          <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
             Renta Variable + Efectivo Disponible
           </div>
         </div>
 
         {/* KPI 2: Renta Variable (Acciones) */}
-        <div className="glass-panel" style={{ padding: '20px', borderLeft: '4px solid #3b82f6' }}>
+        <div className="glass-panel" style={{ padding: 'var(--card-pad, 18px)', borderLeft: '4px solid #3b82f6' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
               Renta Variable
             </span>
             <TrendingUp size={17} color="#3b82f6" />
           </div>
-          <div className="font-mono" style={{ fontSize: '1.75rem', fontWeight: 900, color: '#fff', marginTop: '8px' }}>
+          <div className="font-mono" style={{ fontSize: 'clamp(1.35rem, 2.5vw, 1.75rem)', fontWeight: 900, color: '#fff', marginTop: '8px' }}>
             ${portfolioSummary.totalEquitiesValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </div>
-          <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
             Costo Base: ${portfolioSummary.totalEquitiesCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </div>
         </div>
 
         {/* KPI 3: Efectivo Disponible */}
-        <div className="glass-panel" style={{ padding: '20px', borderLeft: '4px solid var(--accent-green)' }}>
+        <div className="glass-panel" style={{ padding: 'var(--card-pad, 18px)', borderLeft: '4px solid var(--accent-green)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
               Efectivo Disponible
             </span>
             <DollarSign size={17} color="var(--accent-green)" />
           </div>
-          <div className="font-mono" style={{ fontSize: '1.75rem', fontWeight: 900, color: 'var(--accent-green)', marginTop: '8px' }}>
+          <div className="font-mono" style={{ fontSize: 'clamp(1.35rem, 2.5vw, 1.75rem)', fontWeight: 900, color: 'var(--accent-green)', marginTop: '8px' }}>
             ${portfolioSummary.cashAvailable.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </div>
           <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
@@ -892,43 +902,43 @@ export const Watchlist: React.FC<WatchlistProps> = ({
         </div>
 
         {/* KPI 4: P&L No Realizado */}
-        <div className="glass-panel" style={{ padding: '20px', borderLeft: `4px solid ${portfolioSummary.totalUnrealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}` }}>
+        <div className="glass-panel" style={{ padding: 'var(--card-pad, 18px)', borderLeft: `4px solid ${portfolioSummary.totalUnrealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-              P&L No Realizado
+            <span style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              P&amp;L No Realizado
             </span>
             {portfolioSummary.totalUnrealizedPnl >= 0 ? <ArrowUpRight size={17} color="var(--accent-green)" /> : <ArrowDownRight size={17} color="var(--accent-red)" />}
           </div>
           <div className="font-mono" style={{ 
-            fontSize: '1.75rem', 
+            fontSize: 'clamp(1.35rem, 2.5vw, 1.75rem)', 
             fontWeight: 900, 
             color: portfolioSummary.totalUnrealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
             marginTop: '8px'
           }}>
             {portfolioSummary.totalUnrealizedPnl >= 0 ? '+' : ''}${portfolioSummary.totalUnrealizedPnl.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </div>
-          <div style={{ fontSize: '0.76rem', color: portfolioSummary.totalUnrealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)', marginTop: '4px', fontWeight: 700 }}>
+          <div style={{ fontSize: '0.75rem', color: portfolioSummary.totalUnrealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)', marginTop: '4px', fontWeight: 700 }}>
             {portfolioSummary.totalUnrealizedPnlPct >= 0 ? '+' : ''}{portfolioSummary.totalUnrealizedPnlPct.toFixed(2)}% sobre capital invertido
           </div>
         </div>
 
         {/* KPI 5: P&L Realizado */}
-        <div className="glass-panel" style={{ padding: '20px', borderLeft: `4px solid ${portfolioSummary.totalRealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}` }}>
+        <div className="glass-panel" style={{ padding: 'var(--card-pad, 18px)', borderLeft: `4px solid ${portfolioSummary.totalRealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-              P&L Realizado (Cierres)
+            <span style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              P&amp;L Realizado (Cierres)
             </span>
             <CheckCircle2 size={17} color="var(--accent-cyan)" />
           </div>
           <div className="font-mono" style={{ 
-            fontSize: '1.75rem', 
+            fontSize: 'clamp(1.35rem, 2.5vw, 1.75rem)', 
             fontWeight: 900, 
             color: portfolioSummary.totalRealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
             marginTop: '8px'
           }}>
             {portfolioSummary.totalRealizedPnl >= 0 ? '+' : ''}${portfolioSummary.totalRealizedPnl.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </div>
-          <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
             {closedTrades.length} Operaciones liquidadas
           </div>
         </div>
@@ -937,28 +947,28 @@ export const Watchlist: React.FC<WatchlistProps> = ({
       {/* 3. GRÁFICOS DUALES: HISTÓRICO P&L + DISTRIBUCIÓN DE TORTA */}
       <div style={{ 
         display: 'grid', 
-        gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', 
-        gap: '20px', 
-        marginBottom: '28px' 
+        gridTemplateColumns: isMobileOrTablet ? 'minmax(0, 1fr)' : 'minmax(0, 1.4fr) minmax(0, 1fr)', 
+        gap: 'var(--grid-gap, 20px)', 
+        marginBottom: '24px' 
       }}>
         
         {/* GRÁFICO A: Evolución Histórica de P&L */}
-        <div className="glass-panel" style={{ padding: '22px' }}>
+        <div className="glass-panel" style={{ padding: 'var(--card-pad, 20px)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <TrendingUp size={18} color="var(--accent-green)" />
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff', margin: 0 }}>
-                  Evolución Histórica de P&L
+                <h3 style={{ fontSize: '1.02rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+                  Evolución Histórica de P&amp;L
                 </h3>
               </div>
-              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
+              <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
                 Ganancia / Pérdida acumulada a lo largo del tiempo
               </p>
             </div>
 
             {/* Selectores de Temporalidad */}
-            <div style={{ display: 'flex', gap: '4px', background: 'rgba(15, 23, 42, 0.8)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', background: 'rgba(15, 23, 42, 0.8)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
               {(['1W', '1M', '3M', '6M', 'YTD', '1Y', '2Y', 'ALL'] as PnlTimeframe[]).map(tf => {
                 const label = tf === '1W' ? '1S' : tf === '3M' ? '1T' : tf === '1Y' ? '1A' : tf === '2Y' ? '2A' : tf === 'ALL' ? 'Todo' : tf;
                 return (

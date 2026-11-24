@@ -72,6 +72,21 @@
   /* Transiciones */
   --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Estados Semánticos Adicionales */
+  --bg-surface-active: rgba(16, 185, 129, 0.14);
+  --state-success: #10b981;
+  --brand-primary: #06b6d4;
+
+  /* Escala Dinámica Fluida Multi-Dispositivo (PC, Tablet y Celular) */
+  --page-px: clamp(10px, 2.2vw, 24px);
+  --page-py: clamp(12px, 2vw, 24px);
+  --card-pad: clamp(12px, 2vw, 22px);
+  --grid-gap: clamp(10px, 1.6vw, 20px);
+  --fs-h1: clamp(1.18rem, 2.2vw, 1.55rem);
+  --fs-h2: clamp(1.02rem, 1.6vw, 1.28rem);
+  --fs-body: clamp(0.8rem, 1.1vw, 0.9rem);
+  --mobile-bottom-nav-h: 64px;
 }
 
 * {
@@ -357,25 +372,137 @@ body {
   width: 100% !important;
 }
 
-/* Optimización Móvil (Smartphones & Tablets) */
-@media (max-width: 900px) {
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* ============================================================
+   SISTEMA ADAPTATIVO MULTI-DISPOSITIVO (PC, TABLET Y CELULAR)
+   ============================================================ */
+
+.page-shell {
+  max-width: 1600px;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--page-py) var(--page-px);
+}
+
+.hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Columna Ticker Fija en Tablas Deslizables (Tablet / Portátil / Móvil) */
+th.sticky-col-left {
+  position: sticky;
+  left: 0;
+  z-index: 20;
+  background: #090e1a !important;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.45);
+}
+
+td.sticky-col-left,
+.peers-table tbody tr td:first-child:not([colspan]) {
+  position: sticky;
+  left: 0;
+  z-index: 11;
+  background: #0b111e;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.45);
+}
+
+tr.selected-row td.sticky-col-left {
+  background: #0d2122 !important;
+}
+
+.data-row-hover:hover {
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+.data-row-hover:hover td.sticky-col-left {
+  background: #111b2e !important;
+}
+
+/* Modales Adaptativos (Centrado en PC, Bottom Sheet en Celular) */
+.modal-overlay-responsive {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(3, 7, 18, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal-sheet-responsive {
+  max-height: 90dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Optimización Tablets y Portátiles Compactos (<= 1023px) */
+@media (max-width: 1023px) {
   .navbar-top-bar {
-    padding: 10px 12px !important;
-    gap: 10px !important;
-  }
-  .navbar-search-box {
-    width: 100% !important;
-    order: 3;
-  }
-  .navbar-top-bar nav {
-    width: 100%;
-    order: 4;
-    padding-bottom: 4px;
-    -webkit-overflow-scrolling: touch;
+    padding: 8px 14px !important;
+    gap: 8px !important;
   }
   .tradingview-widget-container,
   .tradingview-widget-container iframe {
-    min-height: 420px !important;
+    min-height: 440px !important;
   }
 }
+
+/* Optimización Smartphones (< 768px) */
+@media (max-width: 767px) {
+  body {
+    background-attachment: scroll;
+  }
+
+  .glass-panel {
+    border-radius: 12px;
+  }
+
+  .tradingview-widget-container,
+  .tradingview-widget-container iframe {
+    min-height: 350px !important;
+  }
+
+  .modal-overlay-responsive {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+
+  .modal-sheet-responsive {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 92dvh !important;
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+    border-top-left-radius: 18px !important;
+    border-top-right-radius: 18px !important;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* Evitar auto-zoom forzado en Safari iOS al tocar inputs (< 16px) */
+@supports (-webkit-touch-callout: none) {
+  @media (max-width: 767px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
+  }
+}
+
 

@@ -521,7 +521,7 @@ export const StrategyAIModule: React.FC<StrategyAIModuleProps> = ({ stocks, onSe
   };
 
   return (
-    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '20px' }} className="animate-fade-in">
+    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: 'var(--page-py, 20px) var(--page-px, 16px)' }} className="animate-fade-in">
       
       {/* 1. Barra Superior del Módulo */}
       <div style={{
@@ -534,15 +534,17 @@ export const StrategyAIModule: React.FC<StrategyAIModuleProps> = ({ stocks, onSe
         paddingBottom: '16px',
         borderBottom: '1px solid var(--border-subtle)'
       }}>
-        <div>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '3px 10px', borderRadius: '20px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', color: 'var(--accent-green)', fontSize: '0.74rem', fontWeight: 700, marginBottom: '6px' }}>
-            <Bot size={14} />
-            Motor Autónomo: @escaneador-acciones & @analista-inversor
+        <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '3px 10px', borderRadius: '20px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', color: 'var(--accent-green)', fontSize: '0.72rem', fontWeight: 700, marginBottom: '6px', maxWidth: '100%' }}>
+            <Bot size={14} style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              Motor Autónomo: @escaneador-acciones &amp; @analista-inversor
+            </span>
           </div>
-          <h1 style={{ fontSize: '1.8rem', fontWeight: 900, margin: 0, color: '#fff', letterSpacing: '-0.02em' }}>
+          <h1 style={{ fontSize: 'clamp(1.35rem, 3vw, 1.8rem)', fontWeight: 900, margin: 0, color: '#fff', letterSpacing: '-0.02em' }}>
             Estrategia IA Inversor
           </h1>
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
             Informes descriptivos inmersos en formato revista de finanzas. Termómetro macro, rotación sectorial, filtro de Valor Intrínseco (≥ 20% descuento) y Top 3 diario.
           </p>
         </div>
@@ -705,7 +707,7 @@ export const StrategyAIModule: React.FC<StrategyAIModuleProps> = ({ stocks, onSe
                   </h3>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: '16px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 440px), 1fr))', gap: '16px' }}>
                   
                   {/* Tabla Índices Directores (Macro) */}
                   <div>
@@ -1133,7 +1135,7 @@ export const StrategyAIModule: React.FC<StrategyAIModuleProps> = ({ stocks, onSe
               {/* Grid Comparativo de 3 Columnas Estándar analista-inversor / escaneador-acciones */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))',
                 gap: '16px'
               }}>
                 {activeArticle.top3Candidates.map((topCand, index) => {

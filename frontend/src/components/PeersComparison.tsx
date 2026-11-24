@@ -114,24 +114,24 @@ export const PeersComparison: React.FC<PeersComparisonProps> = ({
   }, [stocks, primaryStock, selectedTickers]);
 
   return (
-    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '32px 24px' }}>
+    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: 'var(--page-py, 24px) var(--page-px, 20px)' }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '28px', flexWrap: 'wrap', gap: '16px' }}>
-        <div>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 14px', borderRadius: '999px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', color: 'var(--brand-primary)', fontSize: '0.82rem', fontWeight: 600, marginBottom: '12px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'clamp(16px, 2.5vw, 28px)', flexWrap: 'wrap', gap: '16px' }}>
+        <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '5px 12px', borderRadius: '999px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', color: 'var(--brand-primary)', fontSize: '0.76rem', fontWeight: 600, marginBottom: '10px' }}>
             <Users size={15} />
             Matriz de Competidores Directos & Pares Industriales
           </div>
-          <h1 style={{ fontSize: '1.9rem', fontWeight: 800, margin: '0 0 8px 0', letterSpacing: '-0.02em' }}>
+          <h1 style={{ fontSize: 'clamp(1.32rem, 3vw, 1.9rem)', fontWeight: 800, margin: '0 0 8px 0', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
             Comparador Cuantitativo Seeking Alpha
           </h1>
-          <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.92rem', maxWidth: '750px' }}>
+          <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: 'clamp(0.8rem, 1.4vw, 0.92rem)', maxWidth: '750px' }}>
             Contrasta simultáneamente hasta 4 activos financieros en función de sus Factor Grades (Valoración, Crecimiento, Rentabilidad, Solvencia y Momento).
           </p>
         </div>
 
         {/* Selector rápido para añadir activo */}
-        <div style={{ position: 'relative', width: '280px' }}>
+        <div style={{ position: 'relative', width: '100%', maxWidth: '320px', flex: '1 1 240px' }}>
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -202,8 +202,8 @@ export const PeersComparison: React.FC<PeersComparisonProps> = ({
 
       {/* Sugerencias de la misma industria */}
       {suggestedPeers.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Sparkles size={14} color="var(--brand-primary)" />
             Pares del sector {primaryStock.sector}:
           </span>
@@ -218,7 +218,7 @@ export const PeersComparison: React.FC<PeersComparisonProps> = ({
                 borderRadius: '6px',
                 padding: '4px 10px',
                 color: 'var(--text-secondary)',
-                fontSize: '0.78rem',
+                fontSize: '0.76rem',
                 cursor: selectedTickers.length >= 4 ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
@@ -237,18 +237,18 @@ export const PeersComparison: React.FC<PeersComparisonProps> = ({
       )}
 
       {/* TABLA COMPARATIVA PRINCIPAL */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '850px' }}>
+      <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border-subtle)', borderRadius: '12px' }}>
+        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <table className="peers-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '680px' }}>
             <thead>
               <tr style={{ background: 'rgba(15, 23, 42, 0.9)', borderBottom: '2px solid var(--border-medium)' }}>
-                <th style={{ padding: '18px 20px', width: '220px', color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Dimensión de Análisis
+                <th className="sticky-col-left" style={{ padding: '14px 14px', width: 'clamp(135px, 22vw, 220px)', color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Dimensión
                 </th>
                 {comparedStocks.map(stock => {
                   const isSaved = watchlist.includes(stock.ticker);
                   return (
-                    <th key={stock.ticker} style={{ padding: '18px 20px', borderLeft: '1px solid var(--border-subtle)', minWidth: '180px' }}>
+                    <th key={stock.ticker} style={{ padding: '14px 16px', borderLeft: '1px solid var(--border-subtle)', minWidth: '165px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

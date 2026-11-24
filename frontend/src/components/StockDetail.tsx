@@ -1323,42 +1323,42 @@ export const StockDetail: React.FC<StockDetailProps> = ({
   );
 
   return (
-    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '24px' }} className="animate-fade-in">
+    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: 'var(--page-py, 20px) var(--page-px, 16px)' }} className="animate-fade-in">
       
       {/* Toast Notificación de Alerta de Cruce + Envío de Correo */}
       {triggeredToast && (
         <div style={{
           position: 'fixed',
-          top: '24px',
-          right: '24px',
+          top: '16px',
+          right: '12px',
           zIndex: 2000,
           background: 'rgba(15, 23, 42, 0.96)',
           backdropFilter: 'blur(16px)',
           border: '2px solid #f59e0b',
           borderRadius: '12px',
-          padding: '16px 20px',
+          padding: '14px 16px',
           boxShadow: '0 20px 40px rgba(0,0,0,0.7)',
-          maxWidth: '420px',
+          maxWidth: 'min(420px, calc(100vw - 24px))',
           display: 'flex',
           alignItems: 'flex-start',
           gap: '12px',
           animation: 'fade-in 0.3s ease-out'
         }}>
-          <BellRing size={24} color="#f59e0b" style={{ flexShrink: 0, marginTop: '2px' }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 800, fontSize: '0.95rem', color: '#fff', marginBottom: '4px' }}>
+          <BellRing size={22} color="#f59e0b" style={{ flexShrink: 0, marginTop: '2px' }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#fff', marginBottom: '4px' }}>
               🚨 Alerta Bursátil: {triggeredToast.ticker}
             </div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
               {triggeredToast.message}
             </div>
             {triggeredToast.note && (
-              <div style={{ fontSize: '0.78rem', color: '#f59e0b', marginTop: '6px' }}>
+              <div style={{ fontSize: '0.76rem', color: '#f59e0b', marginTop: '6px' }}>
                 Nota: {triggeredToast.note}
               </div>
             )}
             {triggeredToast.emailStatus && (
-              <div style={{ fontSize: '0.74rem', color: '#34d399', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: '0.73rem', color: '#34d399', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                 <Mail size={13} />
                 <span>{triggeredToast.emailStatus}</span>
                 {triggeredToast.emailResult && (
@@ -1395,19 +1395,19 @@ export const StockDetail: React.FC<StockDetailProps> = ({
       )}
 
       {/* Botón Volver y Acciones de Cabecera */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
-        <button className="btn btn-secondary" onClick={onBack}>
-          <ArrowLeft size={16} /> Volver al Screener
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
+        <button className="btn btn-secondary" style={{ padding: '7px 12px', fontSize: '0.8rem' }} onClick={onBack}>
+          <ArrowLeft size={15} /> Volver al Screener
         </button>
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button 
             className="btn btn-secondary"
             onClick={() => setShowAddToWatchlistModal(true)}
-            style={{ gap: '6px', fontSize: '0.82rem', fontWeight: 700 }}
+            style={{ gap: '6px', padding: '7px 12px', fontSize: '0.78rem', fontWeight: 700 }}
             title="Organizar en Listas de Seguimiento Personalizadas"
           >
-            <Bookmark size={15} fill={isWatchlisted ? 'var(--accent-cyan)' : 'none'} color={isWatchlisted ? 'var(--accent-cyan)' : 'currentColor'} />
+            <Bookmark size={14} fill={isWatchlisted ? 'var(--accent-cyan)' : 'none'} color={isWatchlisted ? 'var(--accent-cyan)' : 'currentColor'} />
             Listas de Seguimiento
           </button>
 
@@ -1417,64 +1417,66 @@ export const StockDetail: React.FC<StockDetailProps> = ({
             onClick={() => setShowAddPositionModal(true)}
             style={{ 
               gap: '6px', 
-              fontSize: '0.82rem', 
+              padding: '7px 13px',
+              fontSize: '0.78rem', 
               fontWeight: 800,
               background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
               boxShadow: '0 4px 14px rgba(16, 185, 129, 0.25)'
             }}
             title="Abrir formulario oficial de registro para Mi Cartera"
           >
-            <Briefcase size={15} />
+            <Briefcase size={14} />
             Agregar a Mi Cartera
           </button>
         </div>
       </div>
 
       {/* Ficha Principal de la Acción (Estilo Seeking Alpha) */}
-      <div className="glass-panel" style={{ padding: '28px', marginBottom: '24px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '6px' }}>
-              <h1 className="font-mono" style={{ fontSize: '2.2rem', fontWeight: 900, color: '#fff', letterSpacing: '-0.02em' }}>
+      <div className="glass-panel" style={{ padding: 'var(--card-pad, 24px)', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+          <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px', flexWrap: 'wrap' }}>
+              <h1 className="font-mono" style={{ fontSize: 'clamp(1.65rem, 4vw, 2.2rem)', fontWeight: 900, color: '#fff', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
                 {stock.ticker}
               </h1>
               <span style={{
                 background: 'var(--bg-surface-hover)',
                 color: 'var(--text-secondary)',
-                fontSize: '0.8rem',
+                fontSize: '0.74rem',
                 fontWeight: 600,
-                padding: '4px 8px',
+                padding: '3px 8px',
                 borderRadius: '6px',
                 border: '1px solid var(--border-subtle)'
               }}>
                 {stock.country || 'USA'} · {stock.asset_type || 'Common Stock'}
               </span>
               {stock.index_name && (
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
                   Índice: {stock.index_name}
                 </span>
               )}
             </div>
-            <div style={{ fontSize: '1.15rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '8px' }}>
+            <div style={{ fontSize: 'clamp(0.98rem, 2vw, 1.15rem)', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '6px' }}>
               {stock.company}
             </div>
-            <div style={{ display: 'flex', gap: '16px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+            <div style={{ display: 'flex', gap: '8px', rowGap: '4px', flexWrap: 'wrap', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
               <span>Sector: <strong style={{ color: 'var(--text-primary)' }}>{stock.sector || '-'}</strong></span>
               <span>·</span>
               <span>Industria: <strong style={{ color: 'var(--text-primary)' }}>{stock.industry || '-'}</strong></span>
             </div>
 
             {/* Próxima Fecha de Dividendo si la hay */}
-            <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <div style={{
                 background: stock.dividend && stock.dividend > 0 ? 'rgba(16, 185, 129, 0.10)' : 'rgba(255, 255, 255, 0.04)',
                 border: stock.dividend && stock.dividend > 0 ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid var(--border-subtle)',
                 borderRadius: '8px',
-                padding: '6px 12px',
+                padding: '5px 10px',
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '8px',
-                fontSize: '0.80rem'
+                flexWrap: 'wrap',
+                gap: '6px',
+                fontSize: '0.77rem'
               }}>
                 <span style={{ color: 'var(--text-muted)' }}>Dividendo:</span>
                 <strong className="font-mono" style={{ color: stock.dividend && stock.dividend > 0 ? 'var(--accent-green)' : 'var(--text-secondary)' }}>
@@ -1494,16 +1496,16 @@ export const StockDetail: React.FC<StockDetailProps> = ({
           </div>
 
           {/* Precio y Rendimiento */}
-          <div style={{ textAlign: 'right' }}>
-            <div className="font-mono" style={{ fontSize: '2.4rem', fontWeight: 900, color: '#fff', lineHeight: 1.1 }}>
+          <div style={{ textAlign: 'left', flexShrink: 0 }}>
+            <div className="font-mono" style={{ fontSize: 'clamp(1.75rem, 4.5vw, 2.4rem)', fontWeight: 900, color: '#fff', lineHeight: 1.1 }}>
               ${stock.price?.toFixed(2)}
             </div>
             {stock.change_pct !== undefined && stock.change_pct !== null && (
-              <div style={{ fontSize: '1.05rem', fontWeight: 700, marginTop: '4px' }} className={stock.change_pct >= 0 ? 'delta-positive' : 'delta-negative'}>
+              <div style={{ fontSize: '0.96rem', fontWeight: 700, marginTop: '4px' }} className={stock.change_pct >= 0 ? 'delta-positive' : 'delta-negative'}>
                 {stock.change_pct >= 0 ? '+' : ''}{stock.change_pct.toFixed(2)}% Hoy
               </div>
             )}
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '4px' }}>
               Cierre Anterior: ${stock.prev_close?.toFixed(2)}
             </div>
           </div>
@@ -2503,13 +2505,13 @@ export const StockDetail: React.FC<StockDetailProps> = ({
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: 'var(--grid-gap, 20px)' }}>
           {/* Sub-panel 1: Serie Histórica de Variabilidad del Precio con Filtro de Temporalidad */}
           <div style={{
             background: 'var(--bg-surface)',
             border: '1px solid var(--border-subtle)',
             borderRadius: '12px',
-            padding: '18px'
+            padding: 'var(--card-pad, 18px)'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', gap: '10px', flexWrap: 'wrap' }}>
               <strong style={{ fontSize: '0.94rem', color: '#fff' }}>
@@ -2823,7 +2825,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
 
         <div style={{ 
           display: 'grid', 
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', 
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 290px), 1fr))', 
           gap: '14px' 
         }}>
           {Object.values(analysis.grades).map(grade => (
@@ -2884,24 +2886,11 @@ export const StockDetail: React.FC<StockDetailProps> = ({
 
       {/* MODAL: Crear y Administrar Alertas de Cruce de Precio */}
       {showAlertModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.75)',
-          backdropFilter: 'blur(8px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '20px'
-        }}>
-          <div className="glass-panel" style={{
+        <div className="modal-overlay-responsive" style={{ zIndex: 1000 }}>
+          <div className="glass-panel modal-sheet-responsive" style={{
             maxWidth: '520px',
             width: '100%',
-            padding: '28px',
+            padding: 'clamp(18px, 3vw, 28px)',
             borderRadius: '16px',
             background: '#0b1120',
             border: '1px solid var(--border-medium)',
@@ -3020,7 +3009,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
                 Condición de Activación
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: '10px' }}>
                 <button
                   type="button"
                   className={`btn ${newAlertCondition === 'ABOVE' ? 'btn-active' : 'btn-secondary'}`}
@@ -3138,7 +3127,7 @@ export const StockDetail: React.FC<StockDetailProps> = ({
       )}
 
       {/* Grid de Ratios y Fundamentales Detallados */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginBottom: '28px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 265px), 1fr))', gap: 'var(--grid-gap, 20px)', marginBottom: '28px' }}>
         {/* Tarjeta: Múltiplos de Valoración */}
         <div className="glass-panel" style={{ padding: '20px' }}>
           <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#fff', marginBottom: '14px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '8px' }}>

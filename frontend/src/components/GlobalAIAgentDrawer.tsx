@@ -28,6 +28,7 @@ import type {
   ScreenerUIFilterPayload,
 } from '../types/agent';
 import { queryInversorAIAgent } from '../services/agentRagService';
+import { useViewport } from '../context/ViewportContext';
 
 interface GlobalAIAgentDrawerProps {
   isOpen: boolean;
@@ -56,6 +57,7 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
   onApplyScreenerFilters,
   externalPromptTrigger,
 }) => {
+  const { isMobile } = useViewport();
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -743,8 +745,8 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
 
   return (
     <>
-      {/* 1. BOTÓN FLOTANTE GLOBAL (Cuando el Drawer está cerrado) */}
-      {!isOpen && (
+      {/* 1. BOTÓN FLOTANTE GLOBAL (Cuando el Drawer está cerrado en Tablet/Desktop) */}
+      {!isOpen && !isMobile && (
         <button
           id="floating-ai-agent-trigger"
           onClick={onOpen}
@@ -827,10 +829,10 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
         >
           <aside
             style={{
-              width: `min(${drawerWidth}px, 100vw)`,
-              height: '100vh',
+              width: isMobile ? '100vw' : `min(${drawerWidth}px, 100vw)`,
+              height: '100dvh',
               background: 'linear-gradient(180deg, #0b1120 0%, #070b14 100%)',
-              borderLeft: isResizing ? '2px solid var(--accent-cyan)' : '1px solid rgba(56, 189, 248, 0.22)',
+              borderLeft: isMobile ? 'none' : isResizing ? '2px solid var(--accent-cyan)' : '1px solid rgba(56, 189, 248, 0.22)',
               boxShadow: '-12px 0 40px rgba(0, 0, 0, 0.75)',
               display: 'flex',
               flexDirection: 'column',
@@ -841,33 +843,35 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Tirador interactivo para redimensionar arrastrando */}
-            <div
-              onMouseDown={handleMouseDownResize}
-              style={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                bottom: 0,
-                width: '10px',
-                cursor: 'col-resize',
-                zIndex: 100,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: isResizing ? 'rgba(6, 182, 212, 0.25)' : 'transparent',
-              }}
-              title="Arrastra para ajustar el ancho de la ventana"
-            >
+            {/* Tirador interactivo para redimensionar arrastrando (solo Desktop/Tablet) */}
+            {!isMobile && (
               <div
+                onMouseDown={handleMouseDownResize}
                 style={{
-                  width: '3px',
-                  height: '42px',
-                  borderRadius: '3px',
-                  background: isResizing ? 'var(--accent-cyan)' : 'rgba(148, 163, 184, 0.4)',
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: '10px',
+                  cursor: 'col-resize',
+                  zIndex: 100,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: isResizing ? 'rgba(6, 182, 212, 0.25)' : 'transparent',
                 }}
-              />
-            </div>
+                title="Arrastra para ajustar el ancho de la ventana"
+              >
+                <div
+                  style={{
+                    width: '3px',
+                    height: '42px',
+                    borderRadius: '3px',
+                    background: isResizing ? 'var(--accent-cyan)' : 'rgba(148, 163, 184, 0.4)',
+                  }}
+                />
+              </div>
+            )}
             {/* CABECERA DEL DRAWER */}
             <div
               style={{
@@ -1330,7 +1334,8 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
             {/* CAJA DE ENTRADA DE CONSULTA */}
             <div
               style={{
-                padding: '14px 18px',
+                padding: isMobile ? '10px 12px' : '14px 18px',
+                paddingBottom: isMobile ? 'calc(10px + env(safe-area-inset-bottom, 0px))' : '14px',
                 background: 'rgba(15, 23, 42, 0.96)',
                 borderTop: '1px solid rgba(148, 163, 184, 0.16)',
               }}
@@ -1354,7 +1359,7 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
                   type="text"
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
-                  placeholder={`Pregunta sobre ${contextTicker || 'cualquier acción'}, rivales, screener o tu cartera...`}
+                  placeholder={`Pregunta sobre ${contextTicker || 'cualquier acción'}, screener o cartera...`}
                   disabled={isLoading}
                   style={{
                     flex: 1,
@@ -1362,16 +1367,17 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
                     border: 'none',
                     outline: 'none',
                     color: '#ffffff',
-                    fontSize: '0.83rem',
+                    fontSize: '0.84rem',
                     fontFamily: 'inherit',
+                    minWidth: 0,
                   }}
                 />
                 <button
                   type="submit"
                   disabled={isLoading || !inputMessage.trim()}
                   style={{
-                    width: '34px',
-                    height: '34px',
+                    width: '36px',
+                    height: '36px',
                     borderRadius: '8px',
                     background:
                       isLoading || !inputMessage.trim()
@@ -1383,6 +1389,7 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: isLoading || !inputMessage.trim() ? 'not-allowed' : 'pointer',
+                    flexShrink: 0,
                   }}
                   title="Enviar consulta"
                 >
@@ -1395,12 +1402,14 @@ export const GlobalAIAgentDrawer: React.FC<GlobalAIAgentDrawerProps> = ({
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  fontSize: '0.67rem',
+                  flexWrap: 'wrap',
+                  gap: '4px',
+                  fontSize: '0.66rem',
                   color: '#64748b',
                 }}
               >
-                <span>Datos auditados en tiempo real · Cero configuración de claves</span>
-                <span>Haz clic en cualquier ticker de la respuesta para abrir su informe</span>
+                <span>Datos auditados en tiempo real · Supabase RAG</span>
+                {!isMobile && <span>Haz clic en cualquier ticker de la respuesta para abrir su informe</span>}
               </div>
             </div>
           </aside>

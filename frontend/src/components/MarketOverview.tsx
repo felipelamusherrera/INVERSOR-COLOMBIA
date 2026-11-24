@@ -64,17 +64,19 @@ export const MarketOverview: React.FC<MarketOverviewProps> = ({
   })).sort((a, b) => b.count - a.count);
 
   return (
-    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '28px 24px' }} className="animate-fade-in">
+    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: 'var(--page-py, 24px) var(--page-px, 20px)' }} className="animate-fade-in">
       {/* Banner Principal de Bienvenida */}
       <div style={{
         background: 'linear-gradient(135deg, rgba(18, 24, 38, 0.85), rgba(13, 18, 29, 0.95))',
         border: '1px solid var(--border-medium)',
         borderRadius: '16px',
-        padding: '28px 32px',
-        marginBottom: '28px',
+        padding: 'clamp(16px, 3vw, 28px) clamp(16px, 3vw, 32px)',
+        marginBottom: 'clamp(16px, 2.5vw, 28px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '16px',
         position: 'relative',
         overflow: 'hidden',
         boxShadow: 'var(--shadow-lg)'
@@ -89,8 +91,8 @@ export const MarketOverview: React.FC<MarketOverviewProps> = ({
           pointerEvents: 'none'
         }} />
 
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+        <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
             <span style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -99,22 +101,22 @@ export const MarketOverview: React.FC<MarketOverviewProps> = ({
               color: 'var(--accent-green)',
               padding: '4px 10px',
               borderRadius: '20px',
-              fontSize: '0.75rem',
+              fontSize: '0.72rem',
               fontWeight: 700,
               border: '1px solid var(--accent-green-border)'
             }}>
               <Sparkles size={13} />
               UNIVERSO BURSÁTIL ACTIVO
             </span>
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
               Snapshot: <strong style={{ color: '#fff' }}>{snapshotDate || 'Hoy'}</strong>
             </span>
           </div>
 
-          <h1 style={{ fontSize: '1.85rem', fontWeight: 800, color: '#fff', letterSpacing: '-0.02em', marginBottom: '8px' }}>
+          <h1 style={{ fontSize: 'clamp(1.28rem, 3vw, 1.85rem)', fontWeight: 800, color: '#fff', letterSpacing: '-0.02em', marginBottom: '8px', lineHeight: 1.2 }}>
             Monitor Cuantitativo & Factor Grades
           </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', maxWidth: '680px' }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 'clamp(0.8rem, 1.4vw, 0.92rem)', maxWidth: '680px' }}>
             Análisis algorítmico de <strong>{stocks.length} acciones seleccionadas</strong> en Wall Street con fundamentos sólidos, 
             calificaciones de valor y rentabilidad estilo Seeking Alpha y seguimiento continuo de 30 días.
           </p>
@@ -123,10 +125,10 @@ export const MarketOverview: React.FC<MarketOverviewProps> = ({
         <button 
           id="btn-explore-screener"
           className="btn btn-primary"
-          style={{ padding: '12px 22px', fontSize: '0.95rem' }}
+          style={{ padding: '11px 20px', fontSize: '0.88rem', flex: '0 1 auto' }}
           onClick={onGoToScreener}
         >
-          <Layers size={18} />
+          <Layers size={17} />
           Explorar Screener Completo
           <ChevronRight size={16} />
         </button>
@@ -135,12 +137,12 @@ export const MarketOverview: React.FC<MarketOverviewProps> = ({
       {/* Grid de 4 Pilares de Oportunidad */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-        gap: '20px',
-        marginBottom: '32px'
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))',
+        gap: 'var(--grid-gap, 20px)',
+        marginBottom: 'clamp(20px, 3vw, 32px)'
       }}>
         {/* Pilar 1: Top Valor (Menor PEG) */}
-        <div className="glass-panel" style={{ padding: '22px' }}>
+        <div className="glass-panel" style={{ padding: 'var(--card-pad, 20px)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{
